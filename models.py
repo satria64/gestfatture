@@ -6,6 +6,19 @@ from werkzeug.security import generate_password_hash, check_password_hash
 db = SQLAlchemy()
 
 
+# Password "comuni" / facilmente indovinabili — vietate
+COMMON_PASSWORDS = {
+    "password", "password1", "password123", "passw0rd",
+    "admin", "admin123", "admin1234", "administrator",
+    "123456", "12345678", "123456789", "1234567890",
+    "qwerty", "qwerty123", "abc123", "abc12345",
+    "iloveyou", "letmein", "welcome", "welcome1",
+    "monkey", "master", "dragon", "sunshine",
+    "guest", "user", "root", "test", "demo",
+    "gestfatture", "gestfatture123",
+}
+
+
 class User(db.Model, UserMixin):
     __tablename__ = "users"
 
@@ -22,6 +35,22 @@ class User(db.Model, UserMixin):
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
+
+    @staticmethod
+    def validate_password(pw: str) -> tuple[bool, str]:
+        """Verifica regole di complessità. Restituisce (ok, messaggio)."""
+        if not pw or len(pw) < 8:
+            return False, "Password troppo corta: minimo 8 caratteri."
+        if pw.lower() in COMMON_PASSWORDS:
+            return False, "Password troppo comune. Sceglierne una più sicura."
+        if not any(c.isalpha() for c in pw):
+            return False, "La password deve contenere almeno una lettera."
+        if not any(c.isdigit() for c in pw):
+            return False, "La password deve contenere almeno un numero."
+        # Niente spazi all'inizio/fine
+        if pw != pw.strip():
+            return False, "La password non può iniziare o finire con spazi."
+        return True, ""
 
     @property
     def role_label(self):
@@ -201,6 +230,46 @@ class UserSetting(db.Model):
         else:
             db.session.add(UserSetting(user_id=user_id, key=key, value=str(value)))
         db.session.commit()
+
+
+class AuditLog(db.Model):
+    """Registro azioni sensibili eseguite dagli utenti (security audit)."""
+    __tablename__ = "audit_logs"
+
+    id          = db.Column(db.Integer, primary_key=True)
+    timestamp   = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    user_id     = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True, index=True)
+    username    = db.Column(db.String(80))                 # snapshot
+    action      = db.Column(db.String(60), index=True)     # login, logout, password_change…
+    target      = db.Column(db.String(200))                # es. "invoice:42"
+    details     = db.Column(db.Text)                       # JSON / testo libero
+    ip_address  = db.Column(db.String(50))
+    user_agent  = db.Column(db.String(500))
+
+    @property
+    def action_label(self):
+        labels = {
+            "login_success":     ("Login OK",            "success"),
+            "login_failed":      ("Login fallito",       "danger"),
+            "logout":            ("Logout",              "secondary"),
+            "guest_login":       ("Login ospite",        "info"),
+            "guest_deleted":     ("Ospite eliminato",    "secondary"),
+            "password_change":   ("Cambio password",     "warning"),
+            "password_reset":    ("Reset password",      "warning"),
+            "user_created":      ("Utente creato",       "primary"),
+            "user_deleted":      ("Utente eliminato",    "danger"),
+            "user_admin_toggle": ("Cambio ruolo admin",  "warning"),
+            "settings_change":   ("Impostazioni admin",  "primary"),
+            "profile_update":    ("Aggiornamento profilo","info"),
+            "fic_connect":       ("FiC connesso",        "primary"),
+            "fic_disconnect":    ("FiC disconnesso",     "secondary"),
+            "fic_app_credentials":("FiC OAuth credentials","warning"),
+            "ticket_created":    ("Ticket aperto",       "info"),
+            "ticket_status":     ("Stato ticket",        "info"),
+            "clients_merged":    ("Clienti unificati",   "warning"),
+            "test_claude":       ("Test Claude API",     "info"),
+        }
+        return labels.get(self.action, (self.action, "secondary"))
 
 
 class SupportTicket(db.Model):

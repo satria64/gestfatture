@@ -1,7 +1,7 @@
 import os
 import sys
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from flask import (Flask, render_template, request, redirect, session,
                    url_for, flash, jsonify, Response, abort, send_from_directory)
@@ -13,7 +13,7 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
-                    User, PecMessage, SupportTicket, TicketMessage)
+                    User, PecMessage, SupportTicket, TicketMessage, AuditLog)
 from auth import login_manager
 from config import config
 
@@ -59,6 +59,28 @@ def admin_required(f):
             return redirect(url_for("dashboard"))
         return f(*args, **kwargs)
     return wrapped
+
+
+def audit(action: str, target: str = "", details: str = "", user=None):
+    """Registra un evento di sicurezza nel log."""
+    try:
+        u = user or (current_user._get_current_object()
+                     if current_user.is_authenticated else None)
+        log = AuditLog(
+            user_id    = u.id if u else None,
+            username   = u.username if u else "anonymous",
+            action     = action[:60],
+            target     = target[:200],
+            details    = (details or "")[:2000],
+            ip_address = (request.remote_addr or "")[:50],
+            user_agent = (request.user_agent.string if request.user_agent else "")[:500],
+        )
+        db.session.add(log)
+        db.session.commit()
+    except Exception as e:
+        logging.warning("Audit log fallito: %s", e)
+        try: db.session.rollback()
+        except Exception: pass
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -130,6 +152,7 @@ def create_app():
     # ── Sicurezza ────────────────────────────────────────────────────────────
     app.config["MAX_CONTENT_LENGTH"]   = 10 * 1024 * 1024   # 10 MB upload max
     app.config["WTF_CSRF_TIME_LIMIT"]  = 3600 * 8           # 8h CSRF token
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=4)  # logout per inattività
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     if os.environ.get("PORT") or os.environ.get("RENDER"):
@@ -167,6 +190,30 @@ def create_app():
     def inject_csrf():
         return {"csrf_token": generate_csrf}
 
+    # ── Logout automatico per inattività (4h) ────────────────────────────────
+    @app.before_request
+    def check_session_inactivity():
+        if not current_user.is_authenticated:
+            return
+        # Skip per gli endpoint statici e webhook
+        if request.endpoint in (None, "static") or (request.endpoint or "").startswith("webhook"):
+            return
+        last_seen = session.get("_last_activity")
+        now = datetime.utcnow().isoformat()
+        if last_seen:
+            try:
+                last_dt = datetime.fromisoformat(last_seen)
+                if datetime.utcnow() - last_dt > app.config["PERMANENT_SESSION_LIFETIME"]:
+                    audit("logout", target="auto", details="timeout inattività")
+                    logout_user()
+                    session.clear()
+                    flash("⏰ Sessione scaduta per inattività. Effettua di nuovo il login.", "info")
+                    return redirect(url_for("login"))
+            except Exception:
+                pass
+        session["_last_activity"] = now
+        session.permanent = True
+
     with app.app_context():
         db.create_all()
         _migrate_db()
@@ -203,7 +250,9 @@ def create_app():
             user = User.query.filter_by(username=username).first()
             if user and user.check_password(password):
                 login_user(user, remember=request.form.get("remember") == "on")
+                audit("login_success", target=f"user:{username}", user=user)
                 return redirect(request.args.get("next") or url_for("dashboard"))
+            audit("login_failed", target=f"user:{username}", details="credenziali errate")
             flash("Username o password non corretti.", "danger")
         return render_template("login.html")
 
@@ -231,10 +280,15 @@ def create_app():
         # Se è un ospite, dopo il logout cancella anche l'account + i dati
         is_guest = current_user.username.startswith("ospite_")
         guest_user = current_user._get_current_object() if is_guest else None
+        username = current_user.username
+        if not is_guest:
+            audit("logout", target=f"user:{username}")
         logout_user()
         if guest_user:
             try:
                 _delete_user_and_all_data(guest_user)
+                audit("guest_deleted", target=f"user:{username}",
+                      user=None, details="ospite auto-eliminato al logout")
                 flash("👋 Account ospite eliminato. Grazie per aver provato GestFatture!", "info")
             except Exception as e:
                 logging.error("Errore cleanup ospite: %s", e)
@@ -254,6 +308,7 @@ def create_app():
         db.session.add(guest)
         db.session.commit()
         login_user(guest, remember=False)
+        audit("guest_login", target=f"user:{guest.username}", user=guest)
         flash(
             f"👋 Benvenuto, sei entrato come ospite ({guest.username}). "
             "I tuoi dati di test sono privati. Quando esci l'account scompare.",
@@ -268,12 +323,16 @@ def create_app():
         new = request.form.get("new_password", "")
         if not current_user.check_password(old):
             flash("Password attuale non corretta.", "danger")
-        elif len(new) < 6:
-            flash("La nuova password deve avere almeno 6 caratteri.", "danger")
+            audit("password_change", details="password attuale errata")
         else:
-            current_user.set_password(new)
-            db.session.commit()
-            flash("Password aggiornata.", "success")
+            ok, err = User.validate_password(new)
+            if not ok:
+                flash(f"❌ {err}", "danger")
+            else:
+                current_user.set_password(new)
+                db.session.commit()
+                audit("password_change", target=f"user:{current_user.username}")
+                flash("✅ Password aggiornata.", "success")
         return redirect(url_for("settings"))
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -439,6 +498,7 @@ def create_app():
 
         db.session.commit()
         if merged_count:
+            audit("clients_merged", details=f"{merged_count} duplicati rimossi")
             flash(f"✅ Unificati {merged_count} clienti duplicati (raggruppati per P.IVA).", "success")
         else:
             flash("Nessun duplicato trovato.", "info")
@@ -1042,8 +1102,10 @@ def create_app():
                 messages=[{"role": "user", "content": "Rispondi solo: OK"}],
             )
             answer = resp.content[0].text[:80]
+            audit("test_claude", details="ok")
             flash(f"✅ Claude API funziona. Risposta: «{answer}»", "success")
         except Exception as e:
+            audit("test_claude", details=f"failed: {type(e).__name__}")
             flash(f"❌ Claude API errore: {type(e).__name__}: {e}", "danger")
         return redirect(url_for("settings"))
 
@@ -1131,9 +1193,9 @@ def create_app():
         current_user.email = request.form.get("email", "").strip()
         current_user.phone = request.form.get("phone", "").strip()
         db.session.commit()
-        # P.IVA dell'utente in UserSetting (serve per riconoscere fatture passive)
         my_vat = "".join(c for c in request.form.get("my_vat_number", "") if c.isdigit())
         UserSetting.set(current_user.id, "my_vat_number", my_vat)
+        audit("profile_update", target=f"user:{current_user.username}")
         flash("Profilo aggiornato.", "success")
         return redirect(url_for("settings"))
 
@@ -1187,14 +1249,18 @@ def create_app():
                 UserSetting.set(current_user.id, k, request.form.get(k, ""))
             # Chiavi admin solo se admin
             if current_user.is_admin:
+                changed_admin_keys = []
                 for k in admin_keys:
                     val = request.form.get(k, "")
-                    # Trim whitespace/newline (incolli sporchi da copia-incolla)
                     val = val.strip().strip("\r\n\t ")
-                    # Per le password lascia stare se vuoto
                     if k in ("smtp_password",) and not val:
                         continue
+                    old_val = AppSettings.get(k, "")
+                    if old_val != val:
+                        changed_admin_keys.append(k)
                     AppSettings.set(k, val)
+                if changed_admin_keys:
+                    audit("settings_change", details=f"keys: {', '.join(changed_admin_keys)}")
             flash("Impostazioni salvate.", "success")
             return redirect(url_for("settings"))
 
@@ -1440,6 +1506,7 @@ def create_app():
                 UserSetting.set(uid, "integration_fic_company_name", companies[0].get("name", ""))
         except Exception as e:
             logging.warning("FiC u=%d: get_companies fallito: %s", uid, e)
+        audit("fic_connect", target=f"user:{current_user.username}")
         flash("✅ Account Fatture in Cloud collegato.", "success")
         return redirect(url_for("my_integrations"))
 
@@ -1450,6 +1517,7 @@ def create_app():
         for k in ("access_token", "refresh_token", "token_expires_at",
                   "company_id", "company_name", "last_sync"):
             UserSetting.set(uid, f"integration_fic_{k}", "")
+        audit("fic_disconnect", target=f"user:{current_user.username}")
         flash("Account Fatture in Cloud disconnesso.", "info")
         return redirect(url_for("my_integrations"))
 
@@ -1478,8 +1546,11 @@ def create_app():
     def save_fic_app():
         AppSettings.set("integration_fic_client_id", request.form.get("client_id", "").strip())
         new_secret = request.form.get("client_secret", "")
+        secret_changed = bool(new_secret)
         if new_secret:
             AppSettings.set("integration_fic_client_secret", new_secret)
+        audit("fic_app_credentials",
+              details=f"client_id_changed=true, secret_changed={secret_changed}")
         flash("Configurazione app FiC salvata.", "success")
         return redirect(url_for("integrations"))
 
@@ -1501,15 +1572,19 @@ def create_app():
 
         if not username or len(username) < 3:
             flash("Username troppo corto (min 3 caratteri).", "danger")
-        elif len(password) < 6:
-            flash("Password troppo corta (min 6 caratteri).", "danger")
         elif User.query.filter_by(username=username).first():
             flash(f"Username '{username}' già esistente.", "warning")
         else:
-            u = User(username=username, is_admin=is_admin)
-            u.set_password(password)
-            db.session.add(u); db.session.commit()
-            flash(f"Utente '{username}' creato.", "success")
+            ok, err = User.validate_password(password)
+            if not ok:
+                flash(f"❌ {err}", "danger")
+            else:
+                u = User(username=username, is_admin=is_admin)
+                u.set_password(password)
+                db.session.add(u); db.session.commit()
+                audit("user_created", target=f"user:{username}",
+                      details=f"admin={is_admin}")
+                flash(f"Utente '{username}' creato.", "success")
         return redirect(url_for("users"))
 
     @app.route("/users/<int:uid>/delete", methods=["POST"])
@@ -1521,8 +1596,10 @@ def create_app():
         elif u.is_admin and User.query.filter_by(is_admin=True).count() <= 1:
             flash("Non puoi eliminare l'unico amministratore.", "danger")
         else:
+            uname = u.username
             db.session.delete(u); db.session.commit()
-            flash(f"Utente '{u.username}' eliminato.", "info")
+            audit("user_deleted", target=f"user:{uname}")
+            flash(f"Utente '{uname}' eliminato.", "info")
         return redirect(url_for("users"))
 
     @app.route("/users/<int:uid>/toggle-admin", methods=["POST"])
@@ -1536,6 +1613,8 @@ def create_app():
         else:
             u.is_admin = not u.is_admin
             db.session.commit()
+            audit("user_admin_toggle", target=f"user:{u.username}",
+                  details=f"is_admin={u.is_admin}")
             flash(f"Utente '{u.username}' è ora {'amministratore' if u.is_admin else 'utente normale'}.", "success")
         return redirect(url_for("users"))
 
@@ -1544,12 +1623,33 @@ def create_app():
     def reset_user_password(uid):
         u = User.query.get_or_404(uid)
         new_pwd = request.form.get("new_password", "")
-        if len(new_pwd) < 6:
-            flash("Password troppo corta (min 6 caratteri).", "danger")
+        ok, err = User.validate_password(new_pwd)
+        if not ok:
+            flash(f"❌ {err}", "danger")
         else:
             u.set_password(new_pwd); db.session.commit()
+            audit("password_reset", target=f"user:{u.username}")
             flash(f"Password di '{u.username}' aggiornata.", "success")
         return redirect(url_for("users"))
+
+    @app.route("/admin/audit-log")
+    @admin_required
+    def admin_audit_log():
+        # Filtri opzionali
+        action = request.args.get("action", "")
+        username = request.args.get("user", "")
+        q = AuditLog.query
+        if action:
+            q = q.filter_by(action=action)
+        if username:
+            q = q.filter(AuditLog.username.ilike(f"%{username}%"))
+        logs = q.order_by(AuditLog.timestamp.desc()).limit(500).all()
+        # Lista azioni distinte per il filtro dropdown
+        all_actions = [a[0] for a in db.session.query(AuditLog.action)
+                       .distinct().order_by(AuditLog.action).all()]
+        return render_template("audit_log.html",
+                               logs=logs, all_actions=all_actions,
+                               filter_action=action, filter_user=username)
 
     return app
 

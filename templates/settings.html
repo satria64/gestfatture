@@ -351,7 +351,8 @@
         </div>
         <div class="col-sm-4">
           <label class="form-label fw-semibold">Nuova password</label>
-          <input type="password" name="new_password" class="form-control" required minlength="6">
+          <input type="password" name="new_password" class="form-control" required minlength="8"
+                 title="Min 8 caratteri, almeno 1 lettera e 1 numero, no password comuni">
         </div>
         <div class="col-sm-4 d-flex align-items-end">
           <button class="btn btn-warning w-100">
@@ -359,7 +360,10 @@
           </button>
         </div>
       </div>
-      <div class="form-text mt-2">Minimo 6 caratteri. Utente corrente: <strong>{{ current_user.username }}</strong></div>
+      <div class="form-text mt-2">
+        Min 8 caratteri, almeno 1 lettera + 1 numero, niente password comuni (es. "admin", "password").
+        Utente corrente: <strong>{{ current_user.username }}</strong>
+      </div>
     </form>
   </div>
 </div>

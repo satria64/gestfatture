@@ -83,6 +83,13 @@
           <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">ADMIN</span>
         </a>
       </li>
+      <li>
+        <a href="{{ url_for('admin_audit_log') }}"
+           class="nav-link text-white {% if request.endpoint == 'admin_audit_log' %}active{% endif %}">
+          <i class="bi bi-shield-check me-2"></i> Audit Log
+          <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">ADMIN</span>
+        </a>
+      </li>
       {% endif %}
     </ul>
     <hr>

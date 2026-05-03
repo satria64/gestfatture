@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Audit Log – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0"><i class="bi bi-shield-check me-2"></i>Audit Log</h2>
+    <small class="text-muted">
+      Cronologia eventi di sicurezza · ultimi 500 eventi
+    </small>
+  </div>
+</div>
+
+<!-- Filtri -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-2">
+    <form method="get" class="d-flex gap-2 flex-wrap align-items-center">
+      <label class="small fw-semibold mb-0">Azione:</label>
+      <select name="action" class="form-select form-select-sm" style="width:auto"
+              onchange="this.form.submit()">
+        <option value="">— tutte —</option>
+        {% for a in all_actions %}
+        <option value="{{ a }}" {% if filter_action == a %}selected{% endif %}>{{ a }}</option>
+        {% endfor %}
+      </select>
+
+      <label class="small fw-semibold mb-0 ms-3">Utente:</label>
+      <input type="text" name="user" class="form-control form-control-sm"
+             style="width:auto" value="{{ filter_user }}" placeholder="cerca username...">
+
+      <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-search"></i></button>
+      {% if filter_action or filter_user %}
+      <a href="{{ url_for('admin_audit_log') }}" class="btn btn-sm btn-outline-secondary">
+        Reset
+      </a>
+      {% endif %}
+    </form>
+  </div>
+</div>
+
+<!-- Tabella eventi -->
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if logs %}
+    <table class="table table-sm table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Quando</th><th>Utente</th><th>Azione</th>
+          <th>Target</th><th>Dettagli</th><th>IP</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for l in logs %}
+      {% set al = l.action_label %}
+      <tr>
+        <td class="small text-muted text-nowrap">
+          {{ l.timestamp.strftime('%d/%m %H:%M:%S') }}
+        </td>
+        <td><small><strong>{{ l.username or '—' }}</strong></small></td>
+        <td><span class="badge bg-{{ al[1] }}">{{ al[0] }}</span></td>
+        <td><small><code>{{ l.target or '—' }}</code></small></td>
+        <td><small class="text-muted">{{ l.details or '' }}</small></td>
+        <td><small class="text-muted text-nowrap">{{ l.ip_address or '?' }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="text-muted text-center p-5">Nessun evento registrato.</p>
+    {% endif %}
+  </div>
+</div>
+
+<small class="text-muted d-block mt-2">
+  💡 Gli eventi tracciati includono login (successo/fallimento), logout, cambi password,
+  modifiche utenti, modifiche impostazioni admin, connessione/disconnessione integrazioni.
+  Le azioni "rumorose" come marcare una fattura pagata o creare un cliente <strong>NON</strong> vengono loggate
+  per non saturare la tabella.
+</small>
+{% endblock %}

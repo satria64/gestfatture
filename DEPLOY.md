@@ -201,6 +201,43 @@ Render rileva il push e **deploya automaticamente** in ~2 minuti.
 
 ---
 
+## 💾 Backup automatici (Render)
+
+Render fa **snapshot giornalieri automatici** del Persistent Disk sui piani **Starter+**.
+
+Per verificare e gestire:
+
+1. Dashboard Render → service `gestfatture` → tab **Disks**
+2. Sotto al disk `gestfatture-data` vedi la sezione **Snapshots**
+3. Sono disponibili gli ultimi **7 giorni** di backup (automatico, gratuito)
+4. Per **ripristinare** uno snapshot:
+   - Click sui 3 puntini accanto allo snapshot → **Restore**
+   - Conferma → Render crea un nuovo disco da quello snapshot
+   - Ti chiederà di riallineare il servizio sul nuovo disco
+
+⚠️ **Importante**: il backup è del DISCO (database SQLite + uploads PDF). Le impostazioni
+in environment variables sono separate (ma non cambiano spesso).
+
+### Backup manuale (opzionale)
+
+Per archivi più lunghi (>7 giorni) puoi:
+
+1. SSH nel container: dashboard → tab **Shell**
+2. Comprimi il DB:
+   ```bash
+   tar -czf /tmp/backup-$(date +%Y%m%d).tar.gz /var/data
+   ```
+3. Scarica via curl/scp / o usa un cron job che invia su S3
+
+### Disaster recovery rapido
+
+Se il DB è corrotto:
+- Tab **Disks** → snapshot più recente → **Restore**
+- Render rolla indietro tutto il disco in ~5 minuti
+- Le ultime ore di dati possono essere perse (depende quando l'ultimo snapshot)
+
+---
+
 ## 💰 Costi mensili totali (produzione)
 
 | Voce | Costo |
