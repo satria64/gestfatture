@@ -1,9 +1,11 @@
 import os
+import re
 import smtplib
 import logging
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
+from email.utils import formatdate, make_msgid, formataddr
 from datetime import datetime
 
 from models import AppSettings
@@ -20,6 +22,28 @@ def _get_smtp_config():
         "use_tls":  AppSettings.get("smtp_use_tls",  "true") == "true",
         "from_name":AppSettings.get("company_name",  "Gestione Fatture"),
     }
+
+
+def _html_to_text(html: str) -> str:
+    """Converte l'HTML del sollecito in testo semplice leggibile."""
+    # Sostituzione tag a-tag con testo + link tra parentesi
+    text = re.sub(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>',
+                  r'\2 (\1)', html, flags=re.IGNORECASE | re.DOTALL)
+    # br/p in newline
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</p>', '\n\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</div>', '\n', text, flags=re.IGNORECASE)
+    # Rimuovi tutti i tag rimasti
+    text = re.sub(r'<[^>]+>', '', text)
+    # Decodifica entità HTML basiche
+    text = (text.replace('&nbsp;', ' ').replace('&amp;', '&')
+                .replace('&lt;', '<').replace('&gt;', '>')
+                .replace('&quot;', '"').replace('&#39;', "'")
+                .replace('&euro;', '€'))
+    # Comprimi spazi multipli e righe vuote multiple
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 def _build_html(invoice, reminder_type: str, company_name: str, payment_link: str) -> tuple[str, str]:
@@ -130,21 +154,36 @@ def send_reminder(invoice, reminder_type: str) -> bool:
 
     subject, html_body = _build_html(invoice, reminder_type, company_name, payment_link)
 
-    # Se c'è un PDF allegato, usiamo "mixed" come container e mettiamo il body
-    # come sottoparte "alternative" — così l'email è valida con allegato.
+    # ─── Plain text alternativo (richiesto dagli antispam) ──────────────────
+    plain_body = _html_to_text(html_body)
+
+    # Container "mixed" se c'è PDF, "alternative" altrimenti.
+    # Importante: SEMPRE attaccare PRIMA il plain text, POI l'HTML
+    # (lo standard MIME vuole l'ultima parte come "preferita").
     has_pdf = bool(invoice.pdf_filename)
     if has_pdf:
         msg = MIMEMultipart("mixed")
         body_part = MIMEMultipart("alternative")
+        body_part.attach(MIMEText(plain_body, "plain", "utf-8"))
         body_part.attach(MIMEText(html_body, "html", "utf-8"))
         msg.attach(body_part)
     else:
         msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(plain_body, "plain", "utf-8"))
         msg.attach(MIMEText(html_body, "html", "utf-8"))
 
-    msg["Subject"] = subject
-    msg["From"]    = f"{company_name} <{cfg['user']}>"
-    msg["To"]      = recipient
+    # ─── Header completi per anti-spam ──────────────────────────────────────
+    sender_email = cfg["user"]
+    msg["Subject"]    = subject
+    msg["From"]       = formataddr((company_name, sender_email))
+    msg["To"]         = recipient
+    msg["Reply-To"]   = sender_email
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1])
+    msg["X-Mailer"]   = "GestFatture Invoice Manager"
+    # Header importante: dichiara che è una notifica auto, non spam
+    msg["X-Auto-Response-Suppress"] = "OOF, AutoReply"
+    msg["Auto-Submitted"] = "auto-generated"
 
     # Allega il PDF della fattura se presente
     if has_pdf:
