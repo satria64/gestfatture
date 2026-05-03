@@ -162,11 +162,58 @@ def create_app():
             flash("Username o password non corretti.", "danger")
         return render_template("login.html")
 
+    def _delete_user_and_all_data(user):
+        """Cancella un utente e TUTTI i suoi dati (clienti, fatture, settings, ticket, PEC)."""
+        uid = user.id
+        # Ticket → cascade ai messaggi
+        for t in SupportTicket.query.filter_by(user_id=uid).all():
+            db.session.delete(t)
+        for p in PecMessage.query.filter_by(user_id=uid).all():
+            db.session.delete(p)
+        # Clienti → cascade a fatture → reminders
+        for c in Client.query.filter_by(user_id=uid).all():
+            db.session.delete(c)
+        # Eventuali fatture orfane
+        for inv in Invoice.query.filter_by(user_id=uid).all():
+            db.session.delete(inv)
+        UserSetting.query.filter_by(user_id=uid).delete()
+        db.session.delete(user)
+        db.session.commit()
+
     @app.route("/logout")
     @login_required
     def logout():
+        # Se è un ospite, dopo il logout cancella anche l'account + i dati
+        is_guest = current_user.username.startswith("ospite_")
+        guest_user = current_user._get_current_object() if is_guest else None
         logout_user()
+        if guest_user:
+            try:
+                _delete_user_and_all_data(guest_user)
+                flash("👋 Account ospite eliminato. Grazie per aver provato GestFatture!", "info")
+            except Exception as e:
+                logging.error("Errore cleanup ospite: %s", e)
         return redirect(url_for("login"))
+
+    @app.route("/login/guest")
+    def login_as_guest():
+        """Crea un account ospite temporaneo per chi vuole testare l'app.
+        Ogni accesso crea un utente nuovo con dati separati."""
+        import secrets
+        suffix = secrets.token_hex(3)  # 6 caratteri esadecimali
+        guest = User(username=f"ospite_{suffix}", is_admin=False,
+                     email=f"ospite_{suffix}@guest.local")
+        # Password impossibile: l'ospite NON può rientrare con login normale
+        guest.set_password(secrets.token_urlsafe(32))
+        db.session.add(guest)
+        db.session.commit()
+        login_user(guest, remember=False)
+        flash(
+            f"👋 Benvenuto, sei entrato come ospite ({guest.username}). "
+            "I tuoi dati di test sono privati. Quando esci l'account scompare.",
+            "info",
+        )
+        return redirect(url_for("dashboard"))
 
     @app.route("/settings/change-password", methods=["POST"])
     @login_required

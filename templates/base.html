@@ -90,15 +90,29 @@
         <i class="bi bi-play-circle me-1"></i> Esegui job ora
       </button>
     </form>
+    <!-- Banner ospite -->
+    {% if current_user.is_authenticated and current_user.username.startswith('ospite_') %}
+    <div class="alert alert-warning py-2 px-2 mb-2 small text-dark" style="border-radius:6px">
+      <i class="bi bi-info-circle me-1"></i>
+      <strong>Modalità Ospite</strong><br>
+      <span class="opacity-75" style="font-size:.7rem">
+        Dati di test temporanei. Verranno eliminati al logout.
+      </span>
+    </div>
+    {% endif %}
+
     <!-- Utente loggato -->
     <div class="d-flex align-items-center justify-content-between">
       <small class="opacity-75 text-truncate">
         <i class="bi bi-person-circle me-1"></i>{{ current_user.username }}
         {% if current_user.is_authenticated and current_user.is_admin %}
           <span class="badge bg-warning text-dark ms-1" style="font-size:.55rem">ADMIN</span>
+        {% elif current_user.is_authenticated and current_user.username.startswith('ospite_') %}
+          <span class="badge bg-warning text-dark ms-1" style="font-size:.55rem">OSPITE</span>
         {% endif %}
       </small>
-      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light py-0 px-2" title="Esci">
+      <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline-light py-0 px-2"
+         title="Esci{% if current_user.is_authenticated and current_user.username.startswith('ospite_') %} (cancella account ospite){% endif %}">
         <i class="bi bi-box-arrow-right"></i>
       </a>
     </div>
