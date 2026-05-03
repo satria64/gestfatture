@@ -598,11 +598,14 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
 def process_xml_import(xml_bytes: bytes, filename: str, db, upload_folder: str,
                        user_id: int = None) -> tuple[int, int, list[str]]:
     """Importa fatture da file XML FatturaPA (può contenere più fatture)."""
-    from models import Client, Invoice
+    from models import Client, Invoice, UserSetting
     from xml_parser import parse_fattura_pa
 
+    # Recupera la P.IVA dell'utente per riconoscere fatture passive
+    my_vat = UserSetting.get(user_id, "my_vat_number", "") if user_id else ""
+
     try:
-        invoices_data = parse_fattura_pa(xml_bytes)
+        invoices_data = parse_fattura_pa(xml_bytes, my_vat_number=my_vat)
     except ValueError as e:
         return 0, 1, [f"{filename}: {e}"]
 
@@ -622,23 +625,34 @@ def process_xml_import(xml_bytes: bytes, filename: str, db, upload_folder: str,
             skipped += 1; continue
 
         client_name = data.get("client_name", f"Cliente XML ({filename[:30]})")
-        client_q = Client.query.filter(Client.name.ilike(client_name))
-        if user_id is not None:
-            client_q = client_q.filter_by(user_id=user_id)
-        client = client_q.first()
+        vat_clean   = "".join(c for c in (data.get("vat_number") or "") if c.isdigit())
+
+        # ── Matching: prima per P.IVA, poi fallback per nome ────────────────
+        client = None
+        if vat_clean:
+            client_q = Client.query.filter_by(vat_number=vat_clean)
+            if user_id is not None:
+                client_q = client_q.filter_by(user_id=user_id)
+            client = client_q.first()
+        if not client:
+            client_q = Client.query.filter(Client.name.ilike(client_name))
+            if user_id is not None:
+                client_q = client_q.filter_by(user_id=user_id)
+            client = client_q.first()
+
         if not client:
             client = Client(
                 user_id    = user_id,
                 name       = client_name,
-                vat_number = data.get("vat_number", ""),
+                vat_number = vat_clean,
                 address    = data.get("address", ""),
                 pec        = data.get("pec", ""),
             )
             db.session.add(client); db.session.flush()
         else:
-            if data.get("vat_number") and not client.vat_number: client.vat_number = data["vat_number"]
-            if data.get("address")    and not client.address:    client.address    = data["address"]
-            if data.get("pec")        and not client.pec:        client.pec        = data["pec"]
+            if vat_clean and not client.vat_number:           client.vat_number = vat_clean
+            if data.get("address") and not client.address:    client.address    = data["address"]
+            if data.get("pec")     and not client.pec:        client.pec        = data["pec"]
 
         from datetime import timedelta
         issue_date = data.get("issue_date") or date.today()

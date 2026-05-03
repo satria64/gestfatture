@@ -311,6 +311,46 @@ def create_app():
         flash("Cliente eliminato.", "info")
         return redirect(url_for("clients"))
 
+    @app.route("/clients/merge-duplicates", methods=["POST"])
+    @login_required
+    def merge_duplicate_clients():
+        """Unifica i clienti del current_user che hanno la stessa P.IVA."""
+        from collections import defaultdict
+        all_clients = my_clients().filter(Client.vat_number != "").all()
+
+        # Raggruppa per P.IVA
+        groups = defaultdict(list)
+        for c in all_clients:
+            groups[c.vat_number].append(c)
+
+        merged_count = 0
+        for vat, clients_with_vat in groups.items():
+            if len(clients_with_vat) <= 1:
+                continue
+            # Tieni il primo (più vecchio) e sposta tutto il resto su quello
+            keeper = clients_with_vat[0]
+            duplicates = clients_with_vat[1:]
+            for dup in duplicates:
+                # Sposta tutte le fatture del duplicato sul keeper
+                for inv in dup.invoices:
+                    inv.client_id = keeper.id
+                    inv.client    = keeper
+                # Aggiorna campi mancanti del keeper con quelli del duplicato
+                if dup.email   and not keeper.email:   keeper.email   = dup.email
+                if dup.pec     and not keeper.pec:     keeper.pec     = dup.pec
+                if dup.phone   and not keeper.phone:   keeper.phone   = dup.phone
+                if dup.address and not keeper.address: keeper.address = dup.address
+                # Elimina il duplicato
+                db.session.delete(dup)
+                merged_count += 1
+
+        db.session.commit()
+        if merged_count:
+            flash(f"✅ Unificati {merged_count} clienti duplicati (raggruppati per P.IVA).", "success")
+        else:
+            flash("Nessun duplicato trovato.", "info")
+        return redirect(url_for("clients"))
+
     # ═══════════════════════════════════════════════════════════════════════════
     # FATTURE
     # ═══════════════════════════════════════════════════════════════════════════
@@ -971,6 +1011,9 @@ def create_app():
         current_user.email = request.form.get("email", "").strip()
         current_user.phone = request.form.get("phone", "").strip()
         db.session.commit()
+        # P.IVA dell'utente in UserSetting (serve per riconoscere fatture passive)
+        my_vat = "".join(c for c in request.form.get("my_vat_number", "") if c.isdigit())
+        UserSetting.set(current_user.id, "my_vat_number", my_vat)
         flash("Profilo aggiornato.", "success")
         return redirect(url_for("settings"))
 
@@ -1044,16 +1087,18 @@ def create_app():
             for k in admin_keys:
                 current[k] = AppSettings.get(k)
 
-        # Preferenze notifiche
+        # Preferenze notifiche + P.IVA personale
         notify_email    = UserSetting.get(current_user.id, "notify_email_enabled")
         notify_whatsapp = UserSetting.get(current_user.id, "notify_whatsapp_enabled")
         whatsapp_apikey = UserSetting.get(current_user.id, "whatsapp_apikey")
+        my_vat_number   = UserSetting.get(current_user.id, "my_vat_number")
 
         return render_template("settings.html",
             settings=current,
             user_notify_email=notify_email,
             user_notify_whatsapp=notify_whatsapp,
             user_whatsapp_apikey=whatsapp_apikey,
+            user_my_vat_number=my_vat_number,
         )
 
     # ═══════════════════════════════════════════════════════════════════════════

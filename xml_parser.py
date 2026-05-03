@@ -40,10 +40,14 @@ def _text(elem, default: str = "") -> str:
 
 
 # ─── Parser principale FatturaPA ──────────────────────────────────────────────
-def parse_fattura_pa(xml_bytes: bytes) -> list[dict]:
+def parse_fattura_pa(xml_bytes: bytes, my_vat_number: str = "") -> list[dict]:
     """
-    Parsa un XML FatturaPA. Restituisce una lista di dict (un file può aggregare
-    più fatture: un solo header con `CessionarioCommittente`, più body).
+    Parsa un XML FatturaPA.
+
+    Se `my_vat_number` è impostato e coincide con la P.IVA del Cessionario,
+    significa che è una FATTURA PASSIVA (l'utente è il destinatario):
+    in quel caso usiamo il CedentePrestatore (il fornitore) come "cliente".
+    Altrimenti (FATTURA ATTIVA), usiamo il Cessionario come cliente.
     """
     try:
         root = ET.fromstring(xml_bytes)
@@ -55,11 +59,27 @@ def parse_fattura_pa(xml_bytes: bytes) -> list[dict]:
         raise ValueError("Nessun FatturaElettronicaBody trovato nel file XML")
 
     cessionario = _find(root, "CessionarioCommittente")
-    client_data = _parse_anagrafica(cessionario) if cessionario is not None else {}
+    cedente     = _find(root, "CedentePrestatore")
+
+    cessionario_data = _parse_anagrafica(cessionario) if cessionario is not None else {}
+    cedente_data     = _parse_anagrafica(cedente)     if cedente is not None     else {}
+
+    # ── Decidi direzione fattura ─────────────────────────────────────────────
+    direction = "active"  # default: io emetto, cessionario = mio cliente
+    client_data = cessionario_data
+    if my_vat_number:
+        my_clean = "".join(c for c in my_vat_number if c.isdigit())
+        ces_vat  = "".join(c for c in cessionario_data.get("vat_number", "") if c.isdigit())
+        if my_clean and ces_vat == my_clean:
+            # Sono io il cessionario → FATTURA PASSIVA → uso il fornitore
+            direction = "passive"
+            client_data = cedente_data
+            log.info("Fattura passiva rilevata (my_vat=%s)", my_clean)
 
     results = []
     for body in bodies:
         inv = dict(client_data)
+        inv["direction"] = direction
 
         # ── Dati documento ───────────────────────────────────────────────────
         dgd = _find(body, "DatiGeneraliDocumento")
