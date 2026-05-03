@@ -561,15 +561,26 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
     due_date   = data.get("due_date")   or (issue_date + timedelta(days=30))
 
     client_name = data.get("client_name", f"Cliente PDF ({base[:30]})")
-    client_q = Client.query.filter(Client.name.ilike(client_name))
-    if user_id is not None:
-        client_q = client_q.filter_by(user_id=user_id)
-    client = client_q.first()
+    vat_clean   = "".join(c for c in (data.get("vat_number") or "") if c.isdigit())
+
+    # ── Matching: prima per P.IVA, poi fallback per nome ────────────────────
+    client = None
+    if vat_clean:
+        client_q = Client.query.filter_by(vat_number=vat_clean)
+        if user_id is not None:
+            client_q = client_q.filter_by(user_id=user_id)
+        client = client_q.first()
+    if not client:
+        client_q = Client.query.filter(Client.name.ilike(client_name))
+        if user_id is not None:
+            client_q = client_q.filter_by(user_id=user_id)
+        client = client_q.first()
+
     if not client:
         client = Client(
             user_id    = user_id,
             name       = client_name,
-            vat_number = data.get("vat_number", ""),
+            vat_number = vat_clean,
             address    = data.get("address", ""),
             email      = data.get("email", ""),
             pec        = data.get("pec", ""),
@@ -577,11 +588,20 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
         )
         db.session.add(client); db.session.flush()
     else:
-        if data.get("vat_number") and not client.vat_number: client.vat_number = data["vat_number"]
-        if data.get("address")    and not client.address:    client.address    = data["address"]
-        if data.get("email")      and not client.email:      client.email      = data["email"]
-        if data.get("pec")        and not client.pec:        client.pec        = data["pec"]
-        if data.get("phone")      and not client.phone:      client.phone      = data["phone"]
+        # Se l'esistente ha un nome che sembra essere quello dell'UTENTE stesso
+        # (vecchio bug pre-fix), aggiornalo con il nome estratto
+        bad_name = (
+            my_company and client.name.lower().startswith(my_company.lower()[:8])
+            and not client_name.lower().startswith(my_company.lower()[:8])
+        )
+        if bad_name and client_name and len(client_name) > 3:
+            log.info("Auto-fix nome cliente: '%s' → '%s'", client.name, client_name)
+            client.name = client_name[:200]
+        if vat_clean and not client.vat_number:           client.vat_number = vat_clean
+        if data.get("address") and not client.address:    client.address    = data["address"]
+        if data.get("email")   and not client.email:      client.email      = data["email"]
+        if data.get("pec")     and not client.pec:        client.pec        = data["pec"]
+        if data.get("phone")   and not client.phone:      client.phone      = data["phone"]
 
     inv = Invoice(
         user_id=user_id, client_id=client.id, number=number,
@@ -674,6 +694,15 @@ def process_xml_import(xml_bytes: bytes, filename: str, db, upload_folder: str,
             )
             db.session.add(client); db.session.flush()
         else:
+            # Auto-fix se il vecchio nome inizia col nome dell'utente (bug pre-fix)
+            my_company_xml = UserSetting.get(user_id, "company_name", "") if user_id else ""
+            bad_name = (
+                my_company_xml and client.name.lower().startswith(my_company_xml.lower()[:8])
+                and not client_name.lower().startswith(my_company_xml.lower()[:8])
+            )
+            if bad_name and client_name and len(client_name) > 3:
+                log.info("Auto-fix nome cliente XML: '%s' → '%s'", client.name, client_name)
+                client.name = client_name[:200]
             if vat_clean and not client.vat_number:           client.vat_number = vat_clean
             if data.get("address") and not client.address:    client.address    = data["address"]
             if data.get("pec")     and not client.pec:        client.pec        = data["pec"]
