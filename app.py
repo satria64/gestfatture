@@ -1116,6 +1116,8 @@ def create_app():
             if current_user.is_admin:
                 for k in admin_keys:
                     val = request.form.get(k, "")
+                    # Trim whitespace/newline (incolli sporchi da copia-incolla)
+                    val = val.strip().strip("\r\n\t ")
                     # Per le password lascia stare se vuoto
                     if k in ("smtp_password",) and not val:
                         continue
