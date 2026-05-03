@@ -57,9 +57,14 @@ def _strip_codefence(s: str) -> str:
 
 
 def extract_with_claude(pdf_bytes: bytes, api_key: str,
-                        model: str = DEFAULT_MODEL) -> dict:
+                        model: str = DEFAULT_MODEL,
+                        my_vat_number: str = "",
+                        my_company_name: str = "") -> dict:
     """
     Manda il PDF a Claude e restituisce un dict con i campi normalizzati.
+
+    `my_vat_number` e `my_company_name`: se forniti, Claude sa chi è l'utente
+    e può distinguere tra fatture ATTIVE (utente=emittente) e PASSIVE (utente=destinatario).
     Solleva eccezioni se l'API fallisce o il JSON non è parsabile.
     """
     import anthropic
@@ -67,7 +72,29 @@ def extract_with_claude(pdf_bytes: bytes, api_key: str,
     client = anthropic.Anthropic(api_key=api_key)
     pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
 
-    log.info("Claude API: estrazione PDF con modello %s", model)
+    # ── Costruisci il prompt con eventuale contesto identità utente ─────────
+    full_prompt = EXTRACTION_PROMPT
+    if my_vat_number or my_company_name:
+        identity_block = f"""
+
+⚠️ CONTESTO IMPORTANTE — IDENTITÀ DELL'UTENTE DI QUESTA APP:
+- Azienda dell'utente: {my_company_name or '(non specificata)'}
+- P.IVA dell'utente: {my_vat_number or '(non specificata)'}
+
+REGOLE FONDAMENTALI:
+- Se questa azienda è il CEDENTE/EMITTENTE della fattura → è una FATTURA ATTIVA.
+  Estrai il CESSIONARIO/DESTINATARIO come client (procedi normalmente).
+- Se questa azienda è il CESSIONARIO/DESTINATARIO → è una FATTURA PASSIVA.
+  In questo caso ESTRAI IL CEDENTE/EMITTENTE (il fornitore) come "client_name",
+  "vat_number", "address", ecc. NON l'utente stesso.
+
+In entrambi i casi i campi "client_name", "vat_number", ecc. devono SEMPRE riferirsi
+alla CONTROPARTE della fattura, MAI all'utente stesso.
+"""
+        full_prompt = EXTRACTION_PROMPT + identity_block
+
+    log.info("Claude API: estrazione PDF con modello %s (identità: %s)",
+             model, my_company_name or my_vat_number or "n/d")
 
     message = client.messages.create(
         model=model,
@@ -83,7 +110,7 @@ def extract_with_claude(pdf_bytes: bytes, api_key: str,
                         "data":       pdf_b64,
                     },
                 },
-                {"type": "text", "text": EXTRACTION_PROMPT},
+                {"type": "text", "text": full_prompt},
             ],
         }],
     )

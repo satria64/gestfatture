@@ -494,10 +494,16 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
       2. Altrimenti (o se Claude fallisce) → fallback su pypdf + regex.
     Salva il PDF in upload_folder come invoice_<id>.pdf.
     """
-    from models import Client, Invoice, AppSettings
+    from models import Client, Invoice, AppSettings, UserSetting
 
     data = {}
     extraction_method = "regex"
+
+    # Identità utente (serve a distinguere fatture attive/passive)
+    my_vat, my_company = "", ""
+    if user_id:
+        my_vat     = UserSetting.get(user_id, "my_vat_number", "")
+        my_company = UserSetting.get(user_id, "company_name", "")
 
     # ── Tentativo 1: Claude API ──────────────────────────────────────────────
     api_key = AppSettings.get("anthropic_api_key", "")
@@ -505,7 +511,10 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
         try:
             from claude_service import extract_with_claude, DEFAULT_MODEL
             model = AppSettings.get("anthropic_model", "") or DEFAULT_MODEL
-            data  = extract_with_claude(file_bytes, api_key, model=model)
+            data  = extract_with_claude(
+                file_bytes, api_key, model=model,
+                my_vat_number=my_vat, my_company_name=my_company,
+            )
             extraction_method = "claude"
             log.info("PDF '%s' estratto via Claude API", filename)
         except Exception as e:
@@ -520,6 +529,21 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
                 "Configura Anthropic API key per leggere anche scansioni."
             ]
         data = extract_invoice_data(text)
+
+        # Se la regex ha estratto l'UTENTE come cliente → fattura passiva,
+        # cerchiamo l'altra P.IVA nel testo
+        if my_vat:
+            extracted = "".join(c for c in (data.get("vat_number") or "") if c.isdigit())
+            my_clean = "".join(c for c in my_vat if c.isdigit())
+            if extracted and extracted == my_clean:
+                # Trova la prima P.IVA diversa dalla mia nel testo
+                import re as _re
+                others = [m.group(1) for m in _re.finditer(r"\b(\d{11})\b", text)
+                          if m.group(1) != my_clean]
+                if others:
+                    data["vat_number"] = others[0]
+                    data["client_name"] = "(VERIFICA: probabile fornitore - rilevata fattura passiva)"
+                    data["_passive_warning"] = True
 
     # Defaults se mancano
     base = filename.rsplit(".", 1)[0]
