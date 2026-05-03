@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.venv/
+
+# Database (NON commitare il DB di sviluppo)
+*.db
+*.sqlite
+*.sqlite3
+
+# Allegati upload (NON commitare PDF di clienti reali)
+uploads/
+
+# Build PyInstaller
+build/
+dist/
+*.spec
+
+# Variabili ambiente (segreti!)
+.env
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+# Logs
+*.log

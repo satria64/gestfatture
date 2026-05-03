@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}{% if inv %}Modifica{% else %}Nuova{% endif %} Fattura – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2>{% if inv %}Modifica Fattura {{ inv.number }}{% else %}Nuova Fattura{% endif %}</h2>
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width:640px">
+  <div class="card-body">
+    <form method="post" enctype="multipart/form-data">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Tipo documento *</label>
+        <select name="document_type" class="form-select" id="docType" required onchange="onDocTypeChange()">
+          {% set dt = inv.document_type if inv else 'TD01' %}
+          <option value="TD01" {% if dt == 'TD01' %}selected{% endif %}>📄 Fattura (TD01)</option>
+          <option value="TD04" {% if dt == 'TD04' %}selected{% endif %}>↩️ Nota di Credito (TD04)</option>
+          <option value="TD05" {% if dt == 'TD05' %}selected{% endif %}>📈 Nota di Debito (TD05)</option>
+          <option value="TD06" {% if dt == 'TD06' %}selected{% endif %}>🧾 Parcella (TD06)</option>
+        </select>
+        <div class="form-text" id="docTypeHelp">
+          Le note di credito (TD04) <strong>non vengono sollecitate</strong> e l'importo viene
+          automaticamente reso negativo.
+        </div>
+      </div>
+
+      <!-- Selettore "Storna fattura" — visibile solo per TD04 -->
+      <div class="mb-3" id="linkedInvoiceBlock" style="display:none">
+        <label class="form-label fw-semibold">Fattura da stornare</label>
+        <select name="linked_invoice_id" class="form-select">
+          <option value="">— Nessuna (NC indipendente) —</option>
+          {% for f in invoiceable %}
+          <option value="{{ f.id }}"
+            {% if inv and inv.linked_invoice_id == f.id %}selected{% endif %}>
+            {{ f.number }} — {{ f.client.name }} — € {{ "%.2f"|format(f.amount) }} ({{ f.due_date.strftime('%d/%m/%Y') }})
+          </option>
+          {% endfor %}
+        </select>
+        <div class="form-text">
+          La fattura selezionata verrà <strong>marcata come "Compensata da NC"</strong>
+          e non genererà più solleciti.
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Cliente *</label>
+        <select name="client_id" class="form-select" required>
+          <option value="">— Seleziona cliente —</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if inv and inv.client_id == c.id %}selected{% endif %}>
+            {{ c.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">N° Fattura *</label>
+          <input type="text" name="number" class="form-control" required
+                 value="{{ inv.number if inv else '' }}" placeholder="2024/001">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Importo (€) *</label>
+          <input type="text" name="amount" class="form-control" required
+                 value="{{ '%.2f'|format(inv.amount) if inv else '' }}" placeholder="1.500,00">
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Data emissione *</label>
+          <input type="date" name="issue_date" class="form-control" required
+                 value="{{ inv.issue_date.isoformat() if inv else today.isoformat() }}">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Data scadenza *</label>
+          <input type="date" name="due_date" class="form-control" required
+                 value="{{ inv.due_date.isoformat() if inv else '' }}">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Link pagamento</label>
+        <input type="url" name="payment_link" class="form-control"
+               value="{{ inv.payment_link if inv else '' }}"
+               placeholder="https://pay.stripe.com/...">
+        <div class="form-text">Inserito nell'email di sollecito come pulsante "Paga ora".</div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">PDF della fattura</label>
+        {% if inv and inv.pdf_filename %}
+          <div class="d-flex align-items-center gap-2 mb-2 p-2 bg-light rounded border">
+            <i class="bi bi-file-earmark-pdf-fill text-danger fs-4"></i>
+            <a href="{{ url_for('invoice_pdf', iid=inv.id) }}" target="_blank" class="flex-grow-1">
+              {{ inv.pdf_filename }}
+            </a>
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="remove_pdf" value="1" id="rmpdf">
+              <label class="form-check-label small text-danger" for="rmpdf">Rimuovi</label>
+            </div>
+          </div>
+        {% endif %}
+        <input type="file" name="pdf_file" class="form-control" accept=".pdf">
+        <div class="form-text">
+          {% if inv and inv.pdf_filename %}Carica un nuovo PDF per sostituire quello esistente.{% else %}Allegato della fattura — verrà inviato automaticamente con i solleciti via email.{% endif %}
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Note</label>
+        <textarea name="notes" class="form-control" rows="2">{{ inv.notes if inv else '' }}</textarea>
+      </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-save me-1"></i> {% if inv %}Salva modifiche{% else %}Crea documento{% endif %}
+        </button>
+        <a href="{{ url_for('invoices') }}" class="btn btn-outline-secondary">Annulla</a>
+      </div>
+    </form>
+
+    <script>
+      function onDocTypeChange() {
+        const t = document.getElementById('docType').value;
+        document.getElementById('linkedInvoiceBlock').style.display = (t === 'TD04') ? 'block' : 'none';
+        const help = document.getElementById('docTypeHelp');
+        if (t === 'TD04') {
+          help.innerHTML = '↩️ <strong>Nota di credito</strong>: importo reso negativo, niente solleciti, marca la fattura collegata come compensata.';
+        } else if (t === 'TD05') {
+          help.innerHTML = '📈 <strong>Nota di debito</strong>: importo aggiuntivo dovuto dal cliente. Sollecitabile come una fattura.';
+        } else if (t === 'TD06') {
+          help.innerHTML = '🧾 <strong>Parcella</strong> (es. avvocati, consulenti). Trattata come fattura.';
+        } else {
+          help.innerHTML = 'Fattura standard, sollecitabile.';
+        }
+      }
+      // Inizializza al caricamento
+      document.addEventListener('DOMContentLoaded', onDocTypeChange);
+    </script>
+  </div>
+</div>
+{% endblock %}

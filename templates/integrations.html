@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}App FiC OAuth – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-cloud-fill me-2"></i>App OAuth Fatture in Cloud</h2>
+  <p class="text-muted mb-0">
+    Configurazione globale dell'app OAuth Fatture in Cloud usata da tutti gli utenti
+    per collegare i loro account personali. Ogni utente collegherà poi il <em>suo</em>
+    account FiC dalla sua pagina <strong>"Le mie integrazioni"</strong>.
+  </p>
+</div>
+
+<div class="alert alert-info">
+  <i class="bi bi-info-circle me-1"></i>
+  <strong>Modello multi-tenant:</strong> tu (admin) crei UNA app OAuth su
+  developers.fattureincloud.it. Tutti gli utenti la usano per autorizzare il LORO account.
+  Ogni utente vede SOLO le fatture del suo account FiC.
+</div>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">Credenziali app OAuth</div>
+      <div class="card-body">
+        <form action="{{ url_for('save_fic_app') }}" method="post">
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Client ID</label>
+            <input type="text" name="client_id" class="form-control"
+                   value="{{ s.integration_fic_client_id }}" placeholder="abcd1234...">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">
+              Client Secret
+              {% if s.integration_fic_client_secret %}
+                <span class="text-success">(impostato)</span>
+              {% endif %}
+            </label>
+            <input type="password" name="client_secret" class="form-control"
+                   placeholder="{% if s.integration_fic_client_secret %}lascia vuoto per non cambiarlo{% else %}client secret{% endif %}">
+          </div>
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save me-1"></i> Salva configurazione
+          </button>
+        </form>
+
+        <hr>
+
+        <h6 class="fw-semibold mb-2">Come ottenerlo</h6>
+        <ol class="small">
+          <li>Vai su <a href="https://developers.fattureincloud.it/" target="_blank">developers.fattureincloud.it</a></li>
+          <li>Login con il tuo account FiC → "Le mie applicazioni" → Crea</li>
+          <li>Tipo: <strong>OAuth</strong></li>
+          <li>Imposta come <em>Redirect URI</em> (copia esatta):
+            <pre class="bg-light p-2 small mt-1 user-select-all">{{ url_for('my_fic_callback', _external=True) }}</pre>
+          </li>
+          <li>Scope richiesti:
+            <code>entity.clients:r entity.suppliers:r issued_documents.invoices:r received_documents:r</code>
+          </li>
+          <li>Copia <strong>Client ID</strong> e <strong>Client Secret</strong> e incollali qui sopra</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm bg-success-subtle">
+      <div class="card-body small">
+        <h6 class="fw-semibold"><i class="bi bi-shield-check me-1"></i> Privacy multi-tenant</h6>
+        <ul class="mb-0">
+          <li>Ogni utente collega il suo account FiC autonomamente</li>
+          <li>I token sono salvati per-utente</li>
+          <li>Nessun utente vede le fatture o i token degli altri</li>
+          <li>Tu (admin) controlli SOLO l'app OAuth, non i dati</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

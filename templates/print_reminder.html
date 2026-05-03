@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <title>Sollecito – {{ inv.number }}</title>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { font-family: Arial, sans-serif; font-size: 13px; color: #1f2937;
+           background:#fff; padding: 40px; max-width: 720px; margin: 0 auto; }
+
+    .header { display:flex; justify-content:space-between; align-items:flex-start;
+               border-bottom: 3px solid #1e3a5f; padding-bottom: 16px; margin-bottom: 24px; }
+    .company-name { font-size: 22px; font-weight: bold; color: #1e3a5f; }
+    .doc-info { text-align:right; color:#6b7280; font-size:12px; }
+    .doc-info strong { display:block; font-size:16px; color:#1f2937; margin-bottom:4px; }
+
+    .recipient { background:#f8fafc; border-left:4px solid #1e3a5f;
+                 padding:12px 16px; margin-bottom:24px; }
+    .recipient .label { font-size:11px; text-transform:uppercase; letter-spacing:.05em;
+                         color:#6b7280; margin-bottom:4px; }
+    .recipient .name { font-size:15px; font-weight:bold; }
+
+    .subject { font-size:15px; font-weight:bold; margin-bottom:20px;
+               padding: 10px 0; border-bottom: 1px solid #e5e7eb; }
+
+    .body { line-height:1.8; margin-bottom:24px; }
+    .body p { margin-bottom:12px; }
+
+    .invoice-box { border:1px solid #e5e7eb; border-radius:6px;
+                   padding:16px; margin:20px 0; background:#f8fafc; }
+    .invoice-box table { width:100%; border-collapse:collapse; }
+    .invoice-box td { padding:6px 8px; }
+    .invoice-box .label { color:#6b7280; font-size:12px; }
+    .invoice-box .value { font-weight:bold; text-align:right; }
+    .invoice-box .amount { font-size:18px; color:#dc2626; }
+
+    .pay-section { text-align:center; margin:24px 0; }
+    .pay-btn { display:inline-block; background:#2563eb; color:#fff !important;
+               padding:12px 32px; border-radius:6px; text-decoration:none;
+               font-weight:bold; font-size:14px; }
+
+    .footer { margin-top:40px; padding-top:16px; border-top:1px solid #e5e7eb;
+               font-size:11px; color:#6b7280; text-align:center; }
+
+    .badge-type { display:inline-block; padding:3px 10px; border-radius:20px;
+                  font-size:11px; font-weight:bold; text-transform:uppercase; letter-spacing:.05em; }
+    .badge-pre    { background:#fef3c7; color:#92400e; }
+    .badge-s1     { background:#dbeafe; color:#1e40af; }
+    .badge-s2     { background:#fed7aa; color:#92400e; }
+    .badge-s3     { background:#fee2e2; color:#991b1b; }
+    .badge-diffida{ background:#1f2937; color:#fff; }
+
+    @media print {
+      body { padding:20px; }
+      .no-print { display:none !important; }
+      .pay-btn { border: 2px solid #2563eb; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- Pulsanti azioni (nascosti in stampa) -->
+<div class="no-print" style="margin-bottom:20px;display:flex;gap:8px">
+  <button onclick="window.print()" style="padding:8px 20px;background:#1e3a5f;color:#fff;
+          border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+    🖨️ Stampa / Salva PDF
+  </button>
+  <button onclick="window.close()" style="padding:8px 20px;background:#6b7280;color:#fff;
+          border:none;border-radius:6px;cursor:pointer;font-size:13px;">
+    ✕ Chiudi
+  </button>
+</div>
+
+<!-- Documento -->
+<div class="header">
+  <div>
+    <div class="company-name">{{ company_name }}</div>
+  </div>
+  <div class="doc-info">
+    <strong>
+      {% if reminder_type == "pre_scadenza" %}Promemoria di Pagamento
+      {% elif reminder_type == "sollecito_1" %}Primo Sollecito
+      {% elif reminder_type == "sollecito_2" %}Secondo Sollecito
+      {% elif reminder_type == "sollecito_3" %}Terzo Sollecito
+      {% elif reminder_type == "diffida" %}Diffida Formale
+      {% endif %}
+    </strong>
+    Data: {{ today.strftime('%d/%m/%Y') }}<br>
+    Rif. fattura: {{ inv.number }}
+  </div>
+</div>
+
+<div class="recipient">
+  <div class="label">Destinatario</div>
+  <div class="name">{{ inv.client.name }}</div>
+  {% if inv.client.vat_number %}<div>P.IVA: {{ inv.client.vat_number }}</div>{% endif %}
+  {% if inv.client.address %}<div>{{ inv.client.address }}</div>{% endif %}
+  {% if inv.client.pec %}<div>PEC: {{ inv.client.pec }}</div>
+  {% elif inv.client.email %}<div>Email: {{ inv.client.email }}</div>{% endif %}
+</div>
+
+<div class="subject">
+  Oggetto: &nbsp;
+  {% if reminder_type == "pre_scadenza" %}
+    <span class="badge-type badge-pre">Promemoria</span>
+    Fattura n. {{ inv.number }} – scadenza {{ inv.due_date.strftime('%d/%m/%Y') }}
+  {% elif reminder_type == "sollecito_1" %}
+    <span class="badge-type badge-s1">1° Sollecito</span>
+    Fattura n. {{ inv.number }} – mancato pagamento
+  {% elif reminder_type == "sollecito_2" %}
+    <span class="badge-type badge-s2">2° Sollecito</span>
+    Fattura n. {{ inv.number }} – sollecito urgente
+  {% elif reminder_type == "sollecito_3" %}
+    <span class="badge-type badge-s3">3° Sollecito</span>
+    Fattura n. {{ inv.number }} – azione richiesta
+  {% elif reminder_type == "diffida" %}
+    <span class="badge-type badge-diffida">Diffida</span>
+    Fattura n. {{ inv.number }} – diffida formale
+  {% endif %}
+</div>
+
+<div class="body">
+  <p>Gentile <strong>{{ inv.client.name }}</strong>,</p>
+
+  {% if reminder_type == "pre_scadenza" %}
+  <p>con la presente Le ricordiamo che la fattura n. <strong>{{ inv.number }}</strong>
+  dell'importo di <strong>€ {{ "%.2f"|format(inv.amount) }}</strong>
+  è in scadenza il <strong>{{ inv.due_date.strftime('%d/%m/%Y') }}</strong>.</p>
+  <p>La preghiamo di provvedere al pagamento entro la data indicata per evitare
+  eventuali oneri aggiuntivi.</p>
+
+  {% elif reminder_type == "sollecito_1" %}
+  <p>La presente per ricordarLe che la fattura n. <strong>{{ inv.number }}</strong>
+  dell'importo di <strong>€ {{ "%.2f"|format(inv.amount) }}</strong>,
+  con scadenza <strong>{{ inv.due_date.strftime('%d/%m/%Y') }}</strong>,
+  risulta ad oggi <strong>non saldata</strong> ({{ inv.days_overdue }} giorni di ritardo).</p>
+  <p>La invitiamo a provvedere al pagamento entro i prossimi giorni, confidando
+  in una Sua celere risposta.</p>
+
+  {% elif reminder_type == "sollecito_2" %}
+  <p>Nonostante il precedente sollecito, la fattura n. <strong>{{ inv.number }}</strong>
+  di <strong>€ {{ "%.2f"|format(inv.amount) }}</strong>
+  (scadenza {{ inv.due_date.strftime('%d/%m/%Y') }}) risulta ancora
+  <strong>insoluta da {{ inv.days_overdue }} giorni</strong>.</p>
+  <p>Le chiediamo di regolarizzare la sua posizione con la massima urgenza,
+  al fine di evitare l'avvio di ulteriori procedure.</p>
+
+  {% elif reminder_type == "sollecito_3" %}
+  <p>Nonostante i precedenti solleciti rimasti senza riscontro, siamo costretti a
+  richiamare la Sua attenzione sul mancato pagamento della fattura n.
+  <strong>{{ inv.number }}</strong> di <strong>€ {{ "%.2f"|format(inv.amount) }}</strong>,
+  scaduta il {{ inv.due_date.strftime('%d/%m/%Y') }} e rimasta
+  <strong>insoluta per {{ inv.days_overdue }} giorni</strong>.</p>
+  <p>La preghiamo di contattarci entro 48 ore per concordare le modalità di pagamento,
+  pena il ricorso a procedure di recupero crediti.</p>
+
+  {% elif reminder_type == "diffida" %}
+  <p>Con la presente La <strong>DIFFIDIA FORMALMENTE</strong> a provvedere al pagamento
+  della fattura n. <strong>{{ inv.number }}</strong> di
+  <strong>€ {{ "%.2f"|format(inv.amount) }}</strong>, scaduta il
+  {{ inv.due_date.strftime('%d/%m/%Y') }} e <strong>insoluta da {{ inv.days_overdue }} giorni</strong>,
+  nonostante i reiterati solleciti già inviati.</p>
+  <p>In assenza di pagamento integrale entro e non oltre
+  <strong>5 (cinque) giorni lavorativi</strong> dal ricevimento della presente,
+  saremo costretti ad avviare le procedure legali di recupero del credito, con addebito
+  di tutte le spese legali e degli interessi di mora ai sensi del D.Lgs. 231/2002.</p>
+  {% endif %}
+
+  <p>Resto a disposizione per qualsiasi chiarimento.</p>
+  <p>Cordiali saluti,<br><strong>{{ company_name }}</strong></p>
+</div>
+
+<!-- Riepilogo fattura -->
+<div class="invoice-box">
+  <table>
+    <tr>
+      <td class="label">N° Fattura</td>
+      <td class="label">Data emissione</td>
+      <td class="label">Scadenza</td>
+      <td class="label" style="text-align:right">Importo dovuto</td>
+    </tr>
+    <tr>
+      <td class="value" style="text-align:left">{{ inv.number }}</td>
+      <td class="value" style="text-align:left">{{ inv.issue_date.strftime('%d/%m/%Y') }}</td>
+      <td class="value" style="text-align:left">{{ inv.due_date.strftime('%d/%m/%Y') }}</td>
+      <td class="value amount">€ {{ "%.2f"|format(inv.amount) }}</td>
+    </tr>
+  </table>
+</div>
+
+{% if inv.payment_link %}
+<div class="pay-section no-print">
+  <a href="{{ inv.payment_link }}" class="pay-btn" target="_blank">💳 Paga ora</a>
+</div>
+<div style="margin:16px 0;font-size:12px;color:#6b7280">
+  Link pagamento: {{ inv.payment_link }}
+</div>
+{% endif %}
+
+<div class="footer">
+  {{ company_name }} – Documento generato il {{ today.strftime('%d/%m/%Y') }} tramite GestFatture
+</div>
+
+<script>
+  // Auto-apre la finestra di stampa dopo mezzo secondo
+  window.addEventListener("load", () => setTimeout(() => window.print(), 500));
+</script>
+</body>
+</html>

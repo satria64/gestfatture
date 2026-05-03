@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Azione rapida – GestFatture</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <style>
+    body{background:#f1f5f9;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:20px}
+    .quick-card{max-width:460px;width:100%;background:#fff;border-radius:14px;box-shadow:0 10px 40px rgba(0,0,0,.08);overflow:hidden}
+    .quick-header{background:#1e3a5f;color:#fff;padding:24px;text-align:center}
+    .invoice-box{background:#f8fafc;border-radius:8px;padding:14px 16px;margin:16px 0;font-size:14px}
+    .invoice-box .row{padding:4px 0}
+    .invoice-box .label{color:#64748b;font-size:12px}
+    .big-btn{font-size:16px;padding:14px;border-radius:8px}
+  </style>
+</head>
+<body>
+
+<div class="quick-card">
+
+  <!-- ── ERRORE ─────────────────────────────────────────────────── -->
+  {% if error %}
+    <div class="quick-header" style="background:#dc2626">
+      <i class="bi bi-x-circle" style="font-size:48px"></i>
+      <h3 class="mt-2 mb-0">Link non valido</h3>
+    </div>
+    <div class="p-4">
+      <p class="text-muted">{{ error }}</p>
+      <a href="/" class="btn btn-outline-secondary w-100">Vai a GestFatture</a>
+    </div>
+
+  <!-- ── CONFERMA (GET) ─────────────────────────────────────────── -->
+  {% elif stage == "confirm" %}
+    <div class="quick-header">
+      <i class="bi bi-shield-check" style="font-size:42px"></i>
+      <h4 class="mt-2 mb-1">Conferma azione</h4>
+      <p class="mb-0 opacity-75 small">{{ user.username }}</p>
+    </div>
+    <div class="p-4">
+      <p class="text-muted small mb-2">Stai per eseguire questa azione:</p>
+      <h5 class="text-primary mb-3">
+        {% if action_code == 'paid' %}<i class="bi bi-check-circle me-1"></i>{% elif action_code == 'stop' %}<i class="bi bi-bell-slash me-1"></i>{% else %}<i class="bi bi-envelope me-1"></i>{% endif %}
+        {{ action_label }}
+      </h5>
+
+      <div class="invoice-box">
+        <div class="row mx-0"><div class="col-5 label">Numero</div><div class="col-7 fw-semibold">{{ inv.number }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Cliente</div><div class="col-7 fw-semibold">{{ inv.client.name }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Importo</div><div class="col-7 fw-semibold">€ {{ "%.2f"|format(inv.amount) }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Scadenza</div><div class="col-7">{{ inv.due_date.strftime('%d/%m/%Y') }}</div></div>
+        {% if inv.client.contact_email and action_code not in ['paid','stop'] %}
+        <div class="row mx-0"><div class="col-5 label">Destinatario</div><div class="col-7 small">{{ inv.client.contact_email }}</div></div>
+        {% endif %}
+      </div>
+
+      {% if action_code == 'paid' %}
+        <div class="alert alert-info small py-2">
+          <i class="bi bi-info-circle me-1"></i>
+          Confermando, segneremo la fattura come pagata e fermeremo i futuri solleciti.
+        </div>
+      {% elif action_code == 'stop' %}
+        <div class="alert alert-warning small py-2">
+          <i class="bi bi-info-circle me-1"></i>
+          Confermando, non riceverai più notifiche per questa fattura (la fattura resta scaduta).
+        </div>
+      {% else %}
+        <div class="alert alert-warning small py-2">
+          <i class="bi bi-envelope me-1"></i>
+          Confermando, verrà inviata l'email al cliente <strong>{{ inv.client.contact_email or '(non configurato)' }}</strong>.
+        </div>
+      {% endif %}
+
+      <form method="post">
+        <button type="submit" class="btn btn-primary w-100 big-btn fw-bold mb-2">
+          <i class="bi bi-check2-circle me-1"></i> Conferma
+        </button>
+        <a href="/" class="btn btn-outline-secondary w-100">Annulla</a>
+      </form>
+    </div>
+
+  <!-- ── ESITO (POST) ───────────────────────────────────────────── -->
+  {% elif stage == "done" %}
+    {% if result.ok %}
+    <div class="quick-header" style="background:#16a34a">
+      <i class="bi bi-check-circle-fill" style="font-size:48px"></i>
+      <h4 class="mt-2 mb-0">Fatto!</h4>
+    </div>
+    {% else %}
+    <div class="quick-header" style="background:#dc2626">
+      <i class="bi bi-x-circle-fill" style="font-size:48px"></i>
+      <h4 class="mt-2 mb-0">Errore</h4>
+    </div>
+    {% endif %}
+    <div class="p-4">
+      <p class="{% if result.ok %}text-success{% else %}text-danger{% endif %} fw-semibold mb-3">
+        {{ result.msg }}
+      </p>
+
+      <div class="invoice-box">
+        <div class="row mx-0"><div class="col-5 label">Fattura</div><div class="col-7 fw-semibold">{{ inv.number }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Cliente</div><div class="col-7 fw-semibold">{{ inv.client.name }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Importo</div><div class="col-7 fw-semibold">€ {{ "%.2f"|format(inv.amount) }}</div></div>
+        <div class="row mx-0"><div class="col-5 label">Stato</div><div class="col-7">
+          {% set sl = inv.status_label %}<span class="badge bg-{{ sl[1] }}">{{ sl[0] }}</span>
+        </div></div>
+        <div class="row mx-0"><div class="col-5 label">Solleciti inviati</div><div class="col-7">{{ inv.reminder_count or 0 }}</div></div>
+      </div>
+
+      {% if next_url or paid_url %}
+      <div class="border-top pt-3">
+        <p class="text-muted small mb-2"><strong>Cosa vuoi fare adesso?</strong></p>
+        {% if next_url %}
+        <a href="{{ next_url }}" class="btn btn-primary w-100 big-btn mb-2">
+          <i class="bi bi-arrow-right-circle me-1"></i> {{ next_label }}
+        </a>
+        {% endif %}
+        {% if paid_url %}
+        <a href="{{ paid_url }}" class="btn btn-success w-100 mb-2">
+          <i class="bi bi-check-circle me-1"></i> Marca come pagata
+        </a>
+        {% endif %}
+      </div>
+      {% else %}
+      <p class="text-success text-center mt-3 mb-0">
+        <i class="bi bi-emoji-smile me-1"></i> Tutto risolto. Niente altro da fare!
+      </p>
+      {% endif %}
+
+      <a href="/" class="btn btn-outline-secondary w-100 mt-3">
+        <i class="bi bi-box-arrow-up-right me-1"></i> Apri GestFatture
+      </a>
+    </div>
+  {% endif %}
+
+</div>
+</body>
+</html>

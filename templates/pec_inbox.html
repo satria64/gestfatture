@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}PEC Inbox – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0"><i class="bi bi-bank me-2"></i>PEC Istituzionali</h2>
+    <small class="text-muted">
+      AdE · INPS · INAIL · {{ messages|length }} messaggi
+      {% if unread_count %}<span class="badge bg-danger ms-1">{{ unread_count }} non letti</span>{% endif %}
+    </small>
+  </div>
+</div>
+
+<!-- Filtri -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-2 d-flex flex-wrap gap-2 align-items-center">
+    <strong class="me-2">Mittente:</strong>
+    <a href="{{ url_for('pec_inbox') }}" class="btn btn-sm btn-outline-secondary {% if not sender_filter %}active{% endif %}">Tutti</a>
+    <a href="{{ url_for('pec_inbox', sender='Agenzia delle Entrate') }}" class="btn btn-sm btn-outline-primary {% if sender_filter == 'Agenzia delle Entrate' %}active{% endif %}">🏛 AdE</a>
+    <a href="{{ url_for('pec_inbox', sender='Agenzia Riscossione') }}" class="btn btn-sm btn-outline-primary {% if sender_filter == 'Agenzia Riscossione' %}active{% endif %}">🏛 Riscossione</a>
+    <a href="{{ url_for('pec_inbox', sender='INPS') }}" class="btn btn-sm btn-outline-primary {% if sender_filter == 'INPS' %}active{% endif %}">👥 INPS</a>
+    <a href="{{ url_for('pec_inbox', sender='INAIL') }}" class="btn btn-sm btn-outline-primary {% if sender_filter == 'INAIL' %}active{% endif %}">🛡 INAIL</a>
+
+    <span class="vr mx-2"></span>
+    <strong class="me-2">Urgenza:</strong>
+    <a href="{{ url_for('pec_inbox', urgency='alta') }}" class="btn btn-sm btn-outline-danger {% if urgency_filter == 'alta' %}active{% endif %}">🚨 Alta</a>
+    <a href="{{ url_for('pec_inbox', urgency='media') }}" class="btn btn-sm btn-outline-warning {% if urgency_filter == 'media' %}active{% endif %}">⚠️ Media</a>
+    <a href="{{ url_for('pec_inbox', urgency='bassa') }}" class="btn btn-sm btn-outline-secondary {% if urgency_filter == 'bassa' %}active{% endif %}">ℹ️ Bassa</a>
+
+    <span class="vr mx-2"></span>
+    <a href="{{ url_for('pec_inbox', archived=1 if not show_archived else None) }}"
+       class="btn btn-sm {% if show_archived %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+      <i class="bi bi-archive me-1"></i> {% if show_archived %}Mostra solo attivi{% else %}Includi archiviati{% endif %}
+    </a>
+  </div>
+</div>
+
+<!-- Lista PEC -->
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if messages %}
+    <div class="list-group list-group-flush">
+      {% for m in messages %}
+      {% set urg = m.urgency_label %}
+      <a href="{{ url_for('pec_detail', pid=m.id) }}"
+         class="list-group-item list-group-item-action {% if not m.is_read %}fw-bold border-start border-3 border-primary{% endif %}">
+        <div class="d-flex w-100 justify-content-between align-items-start">
+          <div style="flex:1;min-width:0">
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <i class="{{ m.sender_icon }} text-primary"></i>
+              <small class="text-muted">{{ m.sender_label }}</small>
+              <span class="badge bg-{{ urg[1] }}">{{ urg[0] }}</span>
+              {% if m.category %}<span class="badge bg-light text-dark border">{{ m.category }}</span>{% endif %}
+              {% if m.deadline %}
+                <span class="badge bg-danger">⏰ scade {{ m.deadline.strftime('%d/%m/%Y') }}</span>
+              {% endif %}
+              {% if m.is_archived %}<span class="badge bg-secondary">archiviata</span>{% endif %}
+            </div>
+            <div class="text-truncate" style="max-width:100%">{{ m.subject }}</div>
+            {% if m.summary %}
+            <small class="text-muted d-block text-truncate" style="max-width:100%;font-weight:normal">
+              {{ m.summary }}
+            </small>
+            {% endif %}
+          </div>
+          <small class="text-muted text-nowrap ms-3" style="font-weight:normal">
+            {{ m.received_at.strftime('%d/%m/%Y') }}
+          </small>
+        </div>
+      </a>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="text-center text-muted p-5">
+      <i class="bi bi-inbox" style="font-size:48px"></i>
+      <p class="mt-3 mb-0">Nessuna PEC istituzionale ricevuta.</p>
+      <small>Attiva l'analisi PEC nelle <a href="{{ url_for('my_integrations') }}">tue integrazioni</a>.</small>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

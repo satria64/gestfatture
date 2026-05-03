@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block title %}Nuovo ticket – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <a href="{{ url_for('tickets') }}" class="text-muted small text-decoration-none">
+    <i class="bi bi-arrow-left me-1"></i> Torna ai ticket
+  </a>
+  <h2 class="mt-2"><i class="bi bi-plus-circle me-2"></i>Nuovo ticket di assistenza</h2>
+</div>
+
+<div class="alert alert-info">
+  💡 Prima di aprire un ticket, prova a chiedere all'<strong>AI Chat</strong> in basso a destra:
+  spesso risponde subito a domande di configurazione.
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width:680px">
+  <div class="card-body">
+    <form method="post">
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Categoria</label>
+          <select name="category" class="form-select">
+            <option value="question">❓ Domanda / come fare</option>
+            <option value="bug">🐛 Bug / errore</option>
+            <option value="feature">✨ Richiesta di nuova feature</option>
+            <option value="other">📝 Altro</option>
+          </select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Priorità</label>
+          <select name="priority" class="form-select">
+            <option value="low">Bassa</option>
+            <option value="normal" selected>Normale</option>
+            <option value="high">Alta</option>
+            <option value="urgent">Urgente (problema bloccante)</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Oggetto *</label>
+        <input type="text" name="subject" class="form-control" required minlength="5"
+               value="{{ prefill_subject }}"
+               placeholder="Es. La PEC di Aruba non si connette">
+      </div>
+
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Descrizione dettagliata *</label>
+        <textarea name="body" class="form-control" rows="8" required minlength="20"
+                  placeholder="Descrivi il problema:&#10;- Cosa stavi cercando di fare&#10;- Cosa è successo invece&#10;- Eventuali messaggi di errore&#10;- Da quando si verifica">{{ prefill_body }}</textarea>
+        <div class="form-text">Più dettagli fornisci, più velocemente potremo aiutarti.</div>
+      </div>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary px-4">
+          <i class="bi bi-send me-1"></i> Apri ticket
+        </button>
+        <a href="{{ url_for('tickets') }}" class="btn btn-outline-secondary">Annulla</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

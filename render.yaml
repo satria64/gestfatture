@@ -1,0 +1,25 @@
+# Configurazione Infrastructure-as-Code per Render.com
+# https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: gestfatture
+    runtime: python
+    plan: starter   # $7/mese — usa "free" per testare ma il DB si cancella ogni 15 min
+    region: frankfurt   # più vicino all'Italia
+    buildCommand: pip install -r requirements.txt
+    # IMPORTANTE: 1 solo worker perché APScheduler gira in-process
+    startCommand: gunicorn --workers 1 --threads 4 --timeout 120 --bind 0.0.0.0:$PORT "app:create_app()"
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: SECRET_KEY
+        generateValue: true   # Render genera automaticamente una stringa sicura
+      - key: DATABASE_URL
+        value: sqlite:////var/data/invoice_manager.db   # path su disco persistente
+      - key: COMPANY_NAME
+        value: La Tua Azienda
+    disk:
+      name: gestfatture-data
+      mountPath: /var/data   # volume persistente dove vivono SQLite + uploads
+      sizeGB: 1   # 1GB basta per migliaia di fatture
+    autoDeploy: true   # auto-redeploy ad ogni push su GitHub

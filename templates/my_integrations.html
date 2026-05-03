@@ -1,0 +1,228 @@
+{% extends "base.html" %}
+{% block title %}Le mie integrazioni – GestFatture{% endblock %}
+
+{% macro status_badge(enabled, last_sync, last_error) %}
+  {% if last_error %}
+    <span class="badge bg-danger">errore</span>
+  {% elif enabled == 'true' and last_sync %}
+    <span class="badge bg-success">attivo</span>
+  {% elif enabled == 'true' %}
+    <span class="badge bg-warning text-dark">in attesa</span>
+  {% else %}
+    <span class="badge bg-secondary">disabilitato</span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-plug-fill me-2"></i>Le mie integrazioni</h2>
+  <p class="text-muted mb-0">
+    Collega la tua PEC, una cartella locale o il tuo account Fatture in Cloud
+    per importare automaticamente le tue fatture. <strong>I dati restano privati</strong>:
+    solo tu vedi le fatture importate qui.
+  </p>
+</div>
+
+<div class="row g-4">
+
+  <!-- 📁 FOLDER -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center bg-info-subtle text-info-emphasis">
+        <span><i class="bi bi-folder2-open me-1"></i> 📁 Cartella locale</span>
+        {{ status_badge(s.integration_folder_enabled, s.integration_folder_last_sync, "") }}
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">
+          Monitora una tua cartella ogni 30 secondi. I nuovi file XML/p7m/PDF/ZIP
+          vengono importati e spostati in <code>processed/</code>.
+        </p>
+        <form action="{{ url_for('my_save_folder') }}" method="post">
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="folderEnabled"
+                   {% if s.integration_folder_enabled == 'true' %}checked{% endif %}>
+            <label class="form-check-label fw-semibold" for="folderEnabled">Abilita</label>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Percorso cartella</label>
+            <input type="text" name="path" class="form-control" required
+                   value="{{ s.integration_folder_path }}"
+                   placeholder="C:\Users\Tuo\Documents\fatture">
+          </div>
+          <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-save me-1"></i> Salva
+          </button>
+        </form>
+        <hr>
+        <form action="{{ url_for('my_test_folder') }}" method="post" class="d-inline">
+          <input type="hidden" name="path" value="{{ s.integration_folder_path }}">
+          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-check-circle me-1"></i> Test</button>
+        </form>
+        <form action="{{ url_for('my_sync_folder') }}" method="post" class="d-inline">
+          <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-clockwise me-1"></i> Esegui scansione ora</button>
+        </form>
+        {% if s.integration_folder_last_sync %}
+        <div class="text-muted small mt-2">Ultima scansione: {{ s.integration_folder_last_sync[:19].replace('T', ' ') }}</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- 📧 PEC -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center bg-warning-subtle text-warning-emphasis">
+        <span><i class="bi bi-envelope-paper me-1"></i> 📧 La mia PEC</span>
+        {{ status_badge(s.integration_pec_enabled, s.integration_pec_last_sync, s.integration_pec_last_error) }}
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-3">
+          La tua casella PEC verrà controllata ogni 5 minuti. Solo tu vedi le fatture importate.
+        </p>
+        <form action="{{ url_for('my_save_pec') }}" method="post">
+          <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="enabled" id="pecEnabled"
+                   {% if s.integration_pec_enabled == 'true' %}checked{% endif %}>
+            <label class="form-check-label fw-semibold" for="pecEnabled">Abilita</label>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-8">
+              <label class="form-label small fw-semibold">Server IMAP</label>
+              <input type="text" name="host" class="form-control form-control-sm"
+                     value="{{ s.integration_pec_host }}" placeholder="imaps.pec.aruba.it">
+            </div>
+            <div class="col-4">
+              <label class="form-label small fw-semibold">Porta</label>
+              <input type="number" name="port" class="form-control form-control-sm"
+                     value="{{ s.integration_pec_port or '993' }}">
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-semibold">Indirizzo PEC</label>
+            <input type="email" name="user" class="form-control form-control-sm"
+                   value="{{ s.integration_pec_user }}" placeholder="tua@pec.it">
+          </div>
+          <div class="mb-2">
+            <label class="form-label small fw-semibold">
+              Password
+              {% if s._pec_pwd_set %}<span class="text-success">(impostata)</span>{% endif %}
+            </label>
+            <input type="password" name="password" class="form-control form-control-sm"
+                   placeholder="{% if s._pec_pwd_set %}lascia vuoto per non cambiarla{% else %}password PEC{% endif %}">
+          </div>
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label small fw-semibold">Cartella</label>
+              <input type="text" name="folder" class="form-control form-control-sm"
+                     value="{{ s.integration_pec_folder or 'INBOX' }}">
+            </div>
+            <div class="col-6 d-flex align-items-end">
+              <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" name="use_ssl" id="pecSsl"
+                       {% if s.integration_pec_use_ssl != 'false' %}checked{% endif %}>
+                <label class="form-check-label small" for="pecSsl">SSL/TLS</label>
+              </div>
+            </div>
+          </div>
+          <hr class="my-3">
+          <div class="form-check form-switch ps-5">
+            <input class="form-check-input" type="checkbox" name="pec_analysis" id="pecAnalysis"
+                   {% if s.get('pec_analysis_enabled') == 'true' %}checked{% endif %}>
+            <label class="form-check-label fw-semibold text-primary" for="pecAnalysis">
+              <i class="bi bi-stars me-1"></i> Analizza PEC istituzionali (AdE/INPS/INAIL)
+            </label>
+            <div class="form-text">
+              Se attivo: ogni email da AdE/INPS/INAIL viene analizzata da Claude AI,
+              riassunta e ti viene mandata una notifica via email/WhatsApp.
+              <br>Risultati visibili in <a href="{{ url_for('pec_inbox') }}">PEC Istituzionali</a>.
+              <br>⚠️ Richiede API key Claude attiva (configurata dall'admin).
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-sm mt-3"><i class="bi bi-save me-1"></i> Salva</button>
+        </form>
+        <hr>
+        <form action="{{ url_for('my_test_pec') }}" method="post" class="d-inline">
+          <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-plug me-1"></i> Test connessione</button>
+        </form>
+        <form action="{{ url_for('my_sync_pec') }}" method="post" class="d-inline">
+          <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-clockwise me-1"></i> Sincronizza ora</button>
+        </form>
+        {% if s.integration_pec_last_sync %}
+        <div class="text-muted small mt-2">
+          Ultima sincronizzazione: {{ s.integration_pec_last_sync[:19].replace('T', ' ') }}
+          {% if s.integration_pec_last_count %} – {{ s.integration_pec_last_count }} fatture{% endif %}
+        </div>
+        {% endif %}
+        {% if s.integration_pec_last_error %}
+        <div class="alert alert-danger small mt-2 py-1 mb-0">
+          <i class="bi bi-exclamation-triangle me-1"></i>{{ s.integration_pec_last_error }}
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ☁️ FATTURE IN CLOUD -->
+  <div class="col-12">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold d-flex justify-content-between align-items-center bg-primary-subtle text-primary-emphasis">
+        <span><i class="bi bi-cloud-download me-1"></i> ☁️ Il mio Fatture in Cloud</span>
+        {{ status_badge(s.integration_fic_enabled, s.integration_fic_last_sync, s.integration_fic_last_error) }}
+      </div>
+      <div class="card-body">
+        {% if not s._fic_client_id_admin %}
+          <div class="alert alert-warning mb-0">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            L'amministratore del sistema non ha ancora configurato l'app OAuth di Fatture in Cloud.
+            Chiedi a lui di configurarla nella sezione admin "App FiC OAuth".
+          </div>
+        {% else %}
+          <p class="small text-muted mb-3">
+            Sincronizza ogni 30 minuti le tue fatture emesse e ricevute dal tuo account Fatture in Cloud.
+          </p>
+          <form action="{{ url_for('my_save_fic') }}" method="post" class="mb-3">
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" name="enabled" id="ficEnabled"
+                     {% if s.integration_fic_enabled == 'true' %}checked{% endif %}>
+              <label class="form-check-label fw-semibold" for="ficEnabled">Abilita sincronizzazione automatica</label>
+            </div>
+            <button type="submit" class="btn btn-primary btn-sm mt-2"><i class="bi bi-save me-1"></i> Salva</button>
+          </form>
+
+          {% if s._fic_connected %}
+            <div class="alert alert-success py-2">
+              <i class="bi bi-check-circle me-1"></i>
+              Account collegato — Azienda ID: <code>{{ s.integration_fic_company_id or '?' }}</code>
+            </div>
+            <form action="{{ url_for('my_sync_fic') }}" method="post" class="d-inline">
+              <button class="btn btn-sm btn-success"><i class="bi bi-arrow-clockwise me-1"></i> Sincronizza ora</button>
+            </form>
+            <form action="{{ url_for('my_fic_disconnect') }}" method="post" class="d-inline"
+                  onsubmit="return confirm('Disconnettere il tuo account?')">
+              <button class="btn btn-sm btn-outline-danger"><i class="bi bi-plug me-1"></i> Disconnetti</button>
+            </form>
+            {% if s.integration_fic_last_sync %}
+            <div class="text-muted small mt-2">
+              Ultima sincronizzazione: {{ s.integration_fic_last_sync[:19].replace('T', ' ') }}
+              {% if s.integration_fic_last_count %} – {{ s.integration_fic_last_count }} fatture{% endif %}
+            </div>
+            {% endif %}
+            {% if s.integration_fic_last_error %}
+            <div class="alert alert-danger small mt-2 py-1 mb-0">
+              <i class="bi bi-exclamation-triangle me-1"></i>{{ s.integration_fic_last_error }}
+            </div>
+            {% endif %}
+          {% else %}
+            <a href="{{ url_for('my_fic_connect') }}" class="btn btn-primary">
+              <i class="bi bi-box-arrow-up-right me-1"></i>
+              Collega il mio account Fatture in Cloud
+            </a>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

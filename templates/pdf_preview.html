@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}Anteprima estrazione PDF – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-search me-2"></i>Anteprima estrazione PDF</h2>
+  <a href="{{ url_for('import_invoices') }}" class="btn btn-outline-secondary btn-sm">
+    <i class="bi bi-arrow-left me-1"></i> Torna all'import
+  </a>
+</div>
+
+<div class="alert alert-info mb-4">
+  Carica un PDF per vedere <strong>esattamente</strong> cosa il parser estrae.
+  Nessuna fattura viene importata da questa pagina.
+</div>
+
+<form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm mb-4">
+  <div class="card-body d-flex gap-2 align-items-center">
+    <input type="file" name="file" class="form-control" accept=".pdf" required>
+    <button class="btn btn-primary text-nowrap"><i class="bi bi-eye me-1"></i> Analizza</button>
+  </div>
+</form>
+
+{% if result %}
+<div class="row g-4">
+  <!-- Claude API -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-robot me-1"></i> Estrazione via Claude API</span>
+        {% if result.claude_data %}
+          <span class="badge bg-success">OK</span>
+        {% elif result.claude_error %}
+          <span class="badge bg-danger">errore</span>
+        {% elif not result.claude_enabled %}
+          <span class="badge bg-secondary">non configurato</span>
+        {% endif %}
+      </div>
+      <div class="card-body p-0">
+        {% if result.claude_data %}
+        <table class="table mb-0">
+          <tbody>
+            {% for k, v in result.claude_data.items() %}
+            <tr>
+              <th class="text-muted" style="width:35%">{{ k }}</th>
+              <td><code>{{ v }}</code></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% elif result.claude_error %}
+          <div class="p-3"><pre class="mb-0 text-danger small">{{ result.claude_error }}</pre></div>
+        {% else %}
+          <p class="text-muted p-3 mb-0 small">
+            Claude API non attivo. Aggiungi una API key in
+            <a href="{{ url_for('settings') }}">Impostazioni</a> per ottenere
+            estrazioni molto più accurate.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Regex -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+        <i class="bi bi-regex me-1"></i> Estrazione via regex (fallback)
+      </div>
+      <div class="card-body p-0">
+        <table class="table mb-0">
+          <tbody>
+            {% for k, v in result.regex_data.items() %}
+            <tr>
+              <th class="text-muted" style="width:35%">{{ k }}</th>
+              <td><code>{{ v }}</code></td>
+            </tr>
+            {% endfor %}
+            {% if not result.regex_data %}
+            <tr><td colspan="2" class="text-muted p-3">Nessun campo riconosciuto.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- P.IVA trovate -->
+    <div class="card border-0 shadow-sm mt-3">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-card-list me-1"></i> Tutte le P.IVA trovate ({{ result.all_pivas|length }})
+      </div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead class="table-light">
+            <tr><th>#</th><th>P.IVA</th><th>Posizione</th><th>Sezione</th></tr>
+          </thead>
+          <tbody>
+            {% for p in result.all_pivas %}
+            <tr>
+              <td>{{ loop.index }}</td>
+              <td><code>{{ p.piva }}</code></td>
+              <td>{{ p.pos }}</td>
+              <td>
+                {% if result.client_block_start >= 0 and p.pos < result.client_block_start %}
+                  <span class="badge bg-secondary">EMITTENTE</span>
+                {% elif result.client_block_start >= 0 %}
+                  <span class="badge bg-success">CLIENTE</span>
+                {% else %}
+                  <span class="badge bg-warning text-dark">?</span>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+            {% if not result.all_pivas %}
+            <tr><td colspan="4" class="text-muted p-3">Nessuna P.IVA trovata.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Blocco cliente isolato -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis d-flex justify-content-between">
+        <span><i class="bi bi-person-bounding-box me-1"></i> Blocco cliente identificato</span>
+        {% if result.client_side %}
+        <span class="badge bg-primary">
+          dati {% if result.client_side == 'before' %}PRIMA{% else %}DOPO{% endif %} il marker
+        </span>
+        {% endif %}
+      </div>
+      <div class="card-body">
+        {% if result.client_block %}
+          <pre style="background:#f8fafc;padding:12px;border-radius:6px;
+                      max-height:300px;overflow:auto;font-size:12px;
+                      white-space:pre-wrap;word-break:break-word">{{ result.client_block }}</pre>
+        {% else %}
+          <p class="text-muted mb-0">
+            Nessun marker di blocco cliente trovato (Spett.le, Cessionario, Destinatario, ecc.).
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Testo grezzo -->
+  <div class="col-12">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-file-text me-1"></i> Testo estratto dal PDF (raw)
+      </div>
+      <div class="card-body">
+        <pre style="background:#f8fafc;padding:12px;border-radius:6px;
+                    max-height:500px;overflow:auto;font-size:12px;
+                    white-space:pre-wrap;word-break:break-word">{{ result.text }}</pre>
+        <small class="text-muted">
+          {{ result.text|length }} caratteri · file: <strong>{{ result.filename }}</strong>
+        </small>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+{% endblock %}

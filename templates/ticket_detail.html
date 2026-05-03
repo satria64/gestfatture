@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Ticket #{{ ticket.id }} – GestFatture{% endblock %}
+
+{% block content %}
+{% set sl = ticket.status_label %}
+{% set pl = ticket.priority_label %}
+{% set cl = ticket.category_label %}
+<div class="mb-4">
+  <a href="{{ url_for('tickets') }}" class="text-muted small text-decoration-none">
+    <i class="bi bi-arrow-left me-1"></i> Torna ai ticket
+  </a>
+  <div class="d-flex justify-content-between align-items-start mt-2">
+    <div>
+      <h2 class="mb-1">Ticket #{{ ticket.id }} — {{ ticket.subject }}</h2>
+      <div class="d-flex gap-2 flex-wrap">
+        <span class="badge bg-{{ sl[1] }} fs-6">{{ sl[0] }}</span>
+        <span class="badge bg-{{ cl[1] }}">{{ cl[0] }}</span>
+        <span class="badge bg-{{ pl[1] }}">Priorità {{ pl[0] }}</span>
+        <small class="text-muted ms-2">
+          aperto da <strong>{{ ticket.user.username }}</strong>
+          il {{ ticket.created_at.strftime('%d/%m/%Y %H:%M') }}
+        </small>
+      </div>
+    </div>
+
+    {% if current_user.is_admin %}
+    <form method="post" action="{{ url_for('change_ticket_status', tid=ticket.id) }}" class="d-flex gap-2">
+      <select name="status" class="form-select form-select-sm" style="width:auto">
+        <option value="open"         {% if ticket.status == 'open'         %}selected{% endif %}>🔵 Aperto</option>
+        <option value="in_progress"  {% if ticket.status == 'in_progress'  %}selected{% endif %}>⚙️ In lavorazione</option>
+        <option value="waiting_user" {% if ticket.status == 'waiting_user' %}selected{% endif %}>⏳ Attesa utente</option>
+        <option value="resolved"     {% if ticket.status == 'resolved'     %}selected{% endif %}>✅ Risolto</option>
+        <option value="closed"       {% if ticket.status == 'closed'       %}selected{% endif %}>🔒 Chiuso</option>
+      </select>
+      <button class="btn btn-sm btn-outline-secondary">Aggiorna</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Conversazione -->
+<div style="max-width:780px">
+  {% for m in ticket.messages %}
+    {% set is_from_admin = m.author.is_admin %}
+    {% set is_self = m.author_id == current_user.id %}
+    <div class="d-flex mb-3 {% if is_from_admin %}flex-row-reverse{% endif %}">
+      <div class="flex-shrink-0" style="width:40px;height:40px;border-radius:50%;
+        background:{{ '#1e3a5f' if is_from_admin else '#64748b' }};
+        color:white;display:flex;align-items:center;justify-content:center;
+        font-weight:bold;
+        {% if is_from_admin %}margin-left:12px{% else %}margin-right:12px{% endif %}">
+        {{ m.author.username[0]|upper }}
+      </div>
+      <div style="flex:1;max-width:80%">
+        <div class="card border-0 shadow-sm
+            {% if m.is_internal %}bg-warning-subtle border border-warning{% endif %}">
+          <div class="card-body py-2 px-3">
+            <div class="d-flex justify-content-between align-items-center mb-1">
+              <small class="fw-semibold {% if is_from_admin %}text-primary{% endif %}">
+                {{ m.author.username }}
+                {% if is_from_admin %}<span class="badge bg-primary ms-1">ADMIN</span>{% endif %}
+                {% if m.is_internal %}<span class="badge bg-warning text-dark ms-1">Nota interna</span>{% endif %}
+              </small>
+              <small class="text-muted">{{ m.created_at.strftime('%d/%m/%Y %H:%M') }}</small>
+            </div>
+            <div style="white-space:pre-wrap">{{ m.body }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endfor %}
+</div>
+
+<!-- Form risposta -->
+{% if ticket.status != 'closed' %}
+<div class="card border-0 shadow-sm mt-4" style="max-width:780px">
+  <div class="card-header fw-semibold"><i class="bi bi-reply me-1"></i> Rispondi</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('reply_ticket', tid=ticket.id) }}">
+      <textarea name="body" class="form-control mb-3" rows="4" required
+                placeholder="Scrivi la tua risposta…"></textarea>
+
+      {% if current_user.is_admin %}
+      <div class="form-check mb-3">
+        <input class="form-check-input" type="checkbox" name="internal" id="intMsg">
+        <label class="form-check-label small" for="intMsg">
+          🔒 <strong>Nota interna</strong> (visibile solo agli admin, l'utente non la vede)
+        </label>
+      </div>
+      {% endif %}
+
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-send me-1"></i> Invia risposta
+      </button>
+    </form>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-secondary mt-4" style="max-width:780px">
+  <i class="bi bi-lock me-1"></i> Questo ticket è <strong>chiuso</strong>.
+  Apri un nuovo ticket se hai un'altra richiesta.
+</div>
+{% endif %}
+{% endblock %}

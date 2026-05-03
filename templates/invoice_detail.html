@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}Fattura {{ inv.number }} – GestFatture{% endblock %}
+
+{% block content %}
+{% set sl = inv.status_label %}
+{% set dtl = inv.document_type_label %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0">
+      <i class="{{ dtl[2] }} me-2 text-{{ dtl[1] }}"></i>
+      {{ dtl[0] }} {{ inv.number }}
+    </h2>
+    <span class="badge bg-{{ sl[1] }} fs-6 mt-1">{{ sl[0] }}</span>
+    {% if inv.document_type and inv.document_type != 'TD01' %}
+    <span class="badge bg-{{ dtl[1] }} fs-6 mt-1">{{ inv.document_type }}</span>
+    {% endif %}
+    {% if inv.is_credit_note and inv.linked_invoice %}
+    <div class="mt-2 small">
+      <i class="bi bi-link-45deg me-1"></i>
+      Storna fattura
+      <a href="{{ url_for('invoice_detail', iid=inv.linked_invoice.id) }}" class="fw-semibold">
+        n. {{ inv.linked_invoice.number }}
+      </a>
+      ({{ inv.linked_invoice.client.name }})
+    </div>
+    {% endif %}
+    {% if inv.credit_notes.count() > 0 %}
+    <div class="mt-2 small text-warning-emphasis">
+      <i class="bi bi-arrow-counterclockwise me-1"></i>
+      Compensata da {{ inv.credit_notes.count() }} nota/e di credito:
+      {% for nc in inv.credit_notes %}
+        <a href="{{ url_for('invoice_detail', iid=nc.id) }}">{{ nc.number }}</a>{% if not loop.last %}, {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    <a href="{{ url_for('edit_invoice', iid=inv.id) }}" class="btn btn-outline-secondary">
+      <i class="bi bi-pencil me-1"></i> Modifica
+    </a>
+    {% if inv.status != 'paid' %}
+    <form action="{{ url_for('mark_paid', iid=inv.id) }}" method="post">
+      <button class="btn btn-success"><i class="bi bi-check-circle me-1"></i> Segna pagata</button>
+    </form>
+    {% endif %}
+    <!-- Stampa / PDF -->
+    <div class="dropdown">
+      <button class="btn btn-outline-dark dropdown-toggle" data-bs-toggle="dropdown">
+        <i class="bi bi-printer me-1"></i> Stampa / PDF
+      </button>
+      <ul class="dropdown-menu dropdown-menu-end">
+        <li><a class="dropdown-item" href="{{ url_for('print_reminder', iid=inv.id, type='pre_scadenza') }}" target="_blank">Promemoria pre-scadenza</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('print_reminder', iid=inv.id, type='sollecito_1') }}" target="_blank">1° Sollecito</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('print_reminder', iid=inv.id, type='sollecito_2') }}" target="_blank">2° Sollecito</a></li>
+        <li><a class="dropdown-item" href="{{ url_for('print_reminder', iid=inv.id, type='sollecito_3') }}" target="_blank">3° Sollecito</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item text-danger fw-semibold" href="{{ url_for('print_reminder', iid=inv.id, type='diffida') }}" target="_blank">Diffida formale</a></li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Dati fattura -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">Dettagli fattura</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Cliente</dt>
+          <dd class="col-sm-8">
+            <a href="{{ url_for('client_detail', cid=inv.client.id) }}">{{ inv.client.name }}</a>
+          </dd>
+          <dt class="col-sm-4">Importo</dt>
+          <dd class="col-sm-8 fw-bold fs-5">{{ inv.amount | eur }}</dd>
+          <dt class="col-sm-4">Data emissione</dt>
+          <dd class="col-sm-8">{{ inv.issue_date | it_date }}</dd>
+          <dt class="col-sm-4">Scadenza</dt>
+          <dd class="col-sm-8">
+            {{ inv.due_date | it_date }}
+            {% if inv.status == 'overdue' %}
+              <span class="badge bg-danger ms-1">{{ inv.days_overdue }} giorni di ritardo</span>
+            {% elif inv.status == 'pending' %}
+              <span class="badge bg-warning text-dark ms-1">scade in {{ inv.days_until_due }} giorni</span>
+            {% endif %}
+          </dd>
+          {% if inv.payment_date %}
+          <dt class="col-sm-4">Data pagamento</dt>
+          <dd class="col-sm-8">{{ inv.payment_date | it_date }}</dd>
+          {% endif %}
+          {% if inv.payment_ref %}
+          <dt class="col-sm-4">Rif. pagamento</dt>
+          <dd class="col-sm-8"><code class="small">{{ inv.payment_ref }}</code></dd>
+          {% endif %}
+          {% if inv.payment_link %}
+          <dt class="col-sm-4">Link pagamento</dt>
+          <dd class="col-sm-8">
+            <a href="{{ inv.payment_link }}" target="_blank" class="text-truncate d-inline-block" style="max-width:280px">
+              <i class="bi bi-credit-card me-1"></i>{{ inv.payment_link }}
+            </a>
+          </dd>
+          {% endif %}
+          {% if inv.notes %}
+          <dt class="col-sm-4">Note</dt>
+          <dd class="col-sm-8">{{ inv.notes }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+    {% if inv.pdf_filename %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-file-earmark-pdf text-danger me-1"></i> PDF allegato
+      </div>
+      <div class="card-body d-flex gap-2 align-items-center">
+        <i class="bi bi-file-earmark-pdf-fill text-danger fs-1"></i>
+        <div class="flex-grow-1">
+          <div class="fw-semibold">{{ inv.pdf_filename }}</div>
+          <small class="text-muted">Verrà allegato automaticamente ad ogni email di sollecito.</small>
+        </div>
+        <a href="{{ url_for('invoice_pdf', iid=inv.id) }}" target="_blank"
+           class="btn btn-outline-primary">
+          <i class="bi bi-eye me-1"></i> Visualizza
+        </a>
+        <a href="{{ url_for('invoice_pdf', iid=inv.id) }}" download="{{ inv.number }}.pdf"
+           class="btn btn-outline-secondary">
+          <i class="bi bi-download"></i>
+        </a>
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Invia sollecito manuale (NON disponibile per Note di Credito) -->
+    {% if inv.status != 'paid' and not inv.is_credit_note %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold"><i class="bi bi-send me-1"></i> Invia sollecito via email</div>
+      <div class="card-body">
+        <form action="{{ url_for('send_manual_reminder', iid=inv.id) }}" method="post" class="d-flex gap-2">
+          <select name="reminder_type" class="form-select">
+            <option value="pre_scadenza">Promemoria pre-scadenza</option>
+            <option value="sollecito_1">1° Sollecito</option>
+            <option value="sollecito_2">2° Sollecito</option>
+            <option value="sollecito_3">3° Sollecito</option>
+            <option value="diffida">Diffida formale</option>
+          </select>
+          <button class="btn btn-primary text-nowrap">
+            <i class="bi bi-envelope me-1"></i> Invia
+          </button>
+        </form>
+        <small class="text-muted mt-1 d-block">
+          Destinatario: <strong>{{ inv.client.contact_email or '(nessun indirizzo configurato)' }}</strong>
+        </small>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Storico solleciti -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-clock-history me-1"></i> Storico solleciti ({{ inv.reminders|length }})
+      </div>
+      <div class="card-body p-0">
+        {% if inv.reminders %}
+        <ul class="list-group list-group-flush">
+          {% for r in inv.reminders | sort(attribute='sent_at', reverse=True) %}
+          <li class="list-group-item">
+            <div class="d-flex justify-content-between">
+              <span class="badge bg-secondary">{{ r.reminder_type.replace('_',' ').title() }}</span>
+              <small class="text-muted">{{ r.sent_at.strftime('%d/%m/%Y %H:%M') }}</small>
+            </div>
+            <small class="text-muted">
+              {% if r.success %}
+                <i class="bi bi-check-circle text-success"></i> Inviato a {{ r.recipient }}
+              {% else %}
+                <i class="bi bi-x-circle text-danger"></i> Errore: {{ r.error_message }}
+              {% endif %}
+            </small>
+          </li>
+          {% endfor %}
+        </ul>
+        {% else %}
+          <p class="text-muted p-3 mb-0">Nessun sollecito inviato.</p>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="mt-3 text-end">
+      <form action="{{ url_for('delete_invoice', iid=inv.id) }}" method="post"
+            onsubmit="return confirm('Eliminare la fattura {{ inv.number }}?')">
+        <button class="btn btn-outline-danger btn-sm">
+          <i class="bi bi-trash me-1"></i> Elimina fattura
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

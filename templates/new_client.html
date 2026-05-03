@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{% if client %}Modifica{% else %}Nuovo{% endif %} Cliente – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2>{% if client %}Modifica {{ client.name }}{% else %}Nuovo Cliente{% endif %}</h2>
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width:560px">
+  <div class="card-body">
+    <form method="post">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Ragione sociale / Nome *</label>
+        <input type="text" name="name" class="form-control" required
+               value="{{ client.name if client else '' }}" placeholder="Rossi Srl">
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Email</label>
+          <input type="email" name="email" class="form-control"
+                 value="{{ client.email if client else '' }}" placeholder="info@cliente.it">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">PEC</label>
+          <input type="email" name="pec" class="form-control"
+                 value="{{ client.pec if client else '' }}" placeholder="cliente@pec.it">
+          <div class="form-text">Prioritaria per i solleciti.</div>
+        </div>
+      </div>
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Telefono</label>
+          <input type="text" name="phone" class="form-control"
+                 value="{{ client.phone if client else '' }}" placeholder="+39 02 1234567">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">P.IVA / C.F.</label>
+          <input type="text" name="vat_number" class="form-control"
+                 value="{{ client.vat_number if client else '' }}" placeholder="01234567890">
+        </div>
+      </div>
+      <div class="mb-4">
+        <label class="form-label fw-semibold">Indirizzo</label>
+        <input type="text" name="address" class="form-control"
+               value="{{ client.address if client else '' }}" placeholder="Via Roma 1, 20100 Milano">
+      </div>
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">
+          <i class="bi bi-save me-1"></i> {% if client %}Salva modifiche{% else %}Crea cliente{% endif %}
+        </button>
+        <a href="{{ url_for('clients') }}" class="btn btn-outline-secondary">Annulla</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

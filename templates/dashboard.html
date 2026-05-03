@@ -1,0 +1,267 @@
+{% extends "base.html" %}
+{% block title %}Dashboard – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
+  <a href="{{ url_for('new_invoice') }}" class="btn btn-primary">
+    <i class="bi bi-plus-lg me-1"></i> Nuova fattura
+  </a>
+</div>
+
+<!-- KPI count (numero fatture per stato) -->
+<div class="row g-3 mb-3">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Totale fatture</p>
+            <h3 class="mb-0">{{ total_invoices }}</h3>
+          </div>
+          <span class="kpi-icon bg-primary-subtle text-primary"><i class="bi bi-file-earmark-text"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Pagate</p>
+            <h3 class="mb-0 text-success">{{ paid_invoices }}</h3>
+          </div>
+          <span class="kpi-icon bg-success-subtle text-success"><i class="bi bi-check-circle"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">In attesa</p>
+            <h3 class="mb-0 text-warning">{{ pending_invoices }}</h3>
+          </div>
+          <span class="kpi-icon bg-warning-subtle text-warning"><i class="bi bi-hourglass-split"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Scadute</p>
+            <h3 class="mb-0 text-danger">{{ overdue_invoices }}</h3>
+          </div>
+          <span class="kpi-icon bg-danger-subtle text-danger"><i class="bi bi-exclamation-circle"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- KPI importi (totale in EUR per stato) -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm border-start border-primary border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">💰 Totale emesso</p>
+            <h4 class="mb-0 text-primary">{{ total_amount_issued | eur }}</h4>
+            <small class="text-muted">{{ total_invoices }} fatture totali</small>
+          </div>
+          <span class="kpi-icon bg-primary-subtle text-primary"><i class="bi bi-cash-stack"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm border-start border-success border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">✅ Già incassato</p>
+            <h4 class="mb-0 text-success">{{ total_amount_paid | eur }}</h4>
+            <small class="text-muted">{{ paid_invoices }} fatture pagate</small>
+          </div>
+          <span class="kpi-icon bg-success-subtle text-success"><i class="bi bi-piggy-bank"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm border-start border-warning border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">⏳ In pagamento</p>
+            <h4 class="mb-0 text-warning">{{ total_amount_pending | eur }}</h4>
+            <small class="text-muted">{{ pending_invoices }} fatture in attesa</small>
+          </div>
+          <span class="kpi-icon bg-warning-subtle text-warning"><i class="bi bi-clock-history"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm border-start border-danger border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">⚠️ Scaduto da incassare</p>
+            <h4 class="mb-0 text-danger">{{ total_overdue_amount | eur }}</h4>
+            <small class="text-muted">{{ overdue_invoices }} fatture in ritardo</small>
+          </div>
+          <span class="kpi-icon bg-danger-subtle text-danger"><i class="bi bi-currency-euro"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Note di credito + Note di debito -->
+{% if credit_notes_count > 0 or debit_notes_count > 0 %}
+<div class="row g-3 mb-4">
+  {% if credit_notes_count > 0 %}
+  <div class="col-md-6">
+    <div class="card kpi-card border-0 shadow-sm border-start border-warning border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">↩️ Note di credito emesse</p>
+            <h4 class="mb-0 text-warning">{{ credit_notes_amount | eur }}</h4>
+            <small class="text-muted">{{ credit_notes_count }} NC · escluse dai solleciti</small>
+          </div>
+          <span class="kpi-icon bg-warning-subtle text-warning"><i class="bi bi-arrow-counterclockwise"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+  {% if debit_notes_count > 0 %}
+  <div class="col-md-6">
+    <div class="card kpi-card border-0 shadow-sm border-start border-info border-4">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">📈 Note di debito emesse</p>
+            <h4 class="mb-0 text-info">{{ debit_notes_amount | eur }}</h4>
+            <small class="text-muted">{{ debit_notes_count }} ND · sollecitabili come fatture</small>
+          </div>
+          <span class="kpi-icon bg-info-subtle text-info"><i class="bi bi-arrow-up-circle"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="row g-4">
+  <!-- Scadenza imminente -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-warning-subtle text-warning-emphasis fw-semibold">
+        <i class="bi bi-clock-history me-1"></i> In scadenza entro 7 giorni
+      </div>
+      <div class="card-body p-0">
+        {% if upcoming %}
+        <table class="table table-hover mb-0">
+          <thead class="table-light"><tr>
+            <th>Cliente</th><th>Fattura</th><th>Scadenza</th><th>Importo</th>
+          </tr></thead>
+          <tbody>
+          {% for inv in upcoming %}
+            <tr>
+              <td>{{ inv.client.name }}</td>
+              <td><a href="{{ url_for('invoice_detail', iid=inv.id) }}">{{ inv.number }}</a></td>
+              <td>{{ inv.due_date | it_date }}
+                <span class="badge bg-warning text-dark ms-1">{{ inv.days_until_due }}gg</span>
+              </td>
+              <td>{{ inv.amount | eur }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="text-muted p-3 mb-0">Nessuna fattura in scadenza a breve.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Top fatture scadute -->
+  <div class="col-lg-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header bg-danger-subtle text-danger-emphasis fw-semibold">
+        <i class="bi bi-exclamation-triangle me-1"></i> Fatture scadute (più vecchie)
+      </div>
+      <div class="card-body p-0">
+        {% if top_overdue %}
+        <table class="table table-hover mb-0">
+          <thead class="table-light"><tr>
+            <th>Cliente</th><th>Fattura</th><th>Ritardo</th><th>Importo</th>
+          </tr></thead>
+          <tbody>
+          {% for inv in top_overdue %}
+            <tr>
+              <td>{{ inv.client.name }}</td>
+              <td><a href="{{ url_for('invoice_detail', iid=inv.id) }}">{{ inv.number }}</a></td>
+              <td><span class="badge bg-danger">+{{ inv.days_overdue }}gg</span></td>
+              <td>{{ inv.amount | eur }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="text-muted p-3 mb-0">Nessuna fattura scaduta.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Clienti morosi -->
+  <div class="col-12">
+    <div class="card border-0 shadow-sm">
+      <div class="card-header bg-body-secondary fw-semibold">
+        <i class="bi bi-person-exclamation me-1"></i> Clienti con pagamenti in ritardo
+      </div>
+      <div class="card-body p-0">
+        {% if top_debtors %}
+        <table class="table table-hover mb-0">
+          <thead class="table-light"><tr>
+            <th>Cliente</th><th>Fatture scadute</th><th>Importo scaduto</th>
+            <th>Credit Score</th><th>Rischio</th>
+          </tr></thead>
+          <tbody>
+          {% for c in top_debtors %}
+          {% set risk = c.risk_label %}
+          <tr>
+            <td><a href="{{ url_for('client_detail', cid=c.id) }}">{{ c.name }}</a></td>
+            <td>{{ c.overdue_invoices }}</td>
+            <td>{{ c.total_overdue_amount | eur }}</td>
+            <td>
+              <div class="progress" style="height:8px;width:80px">
+                <div class="progress-bar bg-{{ risk[1] }}" style="width:{{ c.credit_score }}%"></div>
+              </div>
+              <small>{{ c.credit_score }}</small>
+            </td>
+            <td><span class="badge bg-{{ risk[1] }}">{{ risk[0] }}</span></td>
+          </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+          <p class="text-muted p-3 mb-0">Nessun cliente con pagamenti in ritardo.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Assistenza – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h2 class="mb-0"><i class="bi bi-life-preserver me-2"></i>Assistenza</h2>
+    <small class="text-muted">
+      {% if scope == 'all' %}Tutti i ticket del sistema{% else %}I miei ticket{% endif %}
+      ({{ tickets|length }})
+    </small>
+  </div>
+  <div class="d-flex gap-2">
+    {% if current_user.is_admin %}
+      {% if scope == 'all' %}
+        <a href="{{ url_for('tickets') }}" class="btn btn-outline-secondary">I miei</a>
+      {% else %}
+        <a href="{{ url_for('tickets', all=1) }}" class="btn btn-outline-warning">
+          <i class="bi bi-shield-lock me-1"></i> Tutti i ticket
+          {% if admin_open_count %}
+          <span class="badge bg-danger ms-1">{{ admin_open_count }} aperti</span>
+          {% endif %}
+        </a>
+      {% endif %}
+    {% endif %}
+    <a href="{{ url_for('new_ticket') }}" class="btn btn-primary">
+      <i class="bi bi-plus-lg me-1"></i> Nuovo ticket
+    </a>
+  </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if tickets %}
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>#</th><th>Oggetto</th>
+          {% if scope == 'all' %}<th>Utente</th>{% endif %}
+          <th>Categoria</th><th>Priorità</th><th>Stato</th>
+          <th>Messaggi</th><th>Aggiornato</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for t in tickets %}
+      {% set sl = t.status_label %}
+      {% set pl = t.priority_label %}
+      {% set cl = t.category_label %}
+      <tr {% if t.status in ['open','in_progress'] %}class="fw-semibold"{% endif %}
+          onclick="window.location='{{ url_for('ticket_detail', tid=t.id) }}'"
+          style="cursor:pointer">
+        <td>#{{ t.id }}</td>
+        <td>
+          <a href="{{ url_for('ticket_detail', tid=t.id) }}" class="text-decoration-none">
+            {{ t.subject }}
+          </a>
+        </td>
+        {% if scope == 'all' %}<td><small>{{ t.user.username }}</small></td>{% endif %}
+        <td><span class="badge bg-{{ cl[1] }}">{{ cl[0] }}</span></td>
+        <td><span class="badge bg-{{ pl[1] }}">{{ pl[0] }}</span></td>
+        <td><span class="badge bg-{{ sl[1] }}">{{ sl[0] }}</span></td>
+        <td><small>{{ t.messages_count }}</small></td>
+        <td><small class="text-muted">{{ t.updated_at.strftime('%d/%m/%Y %H:%M') }}</small></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <div class="text-center text-muted p-5">
+        <i class="bi bi-emoji-smile" style="font-size:48px"></i>
+        <p class="mt-3 mb-1">Nessun ticket aperto. Tutto sotto controllo!</p>
+        <small>Hai un problema? <a href="{{ url_for('new_ticket') }}">Apri un ticket</a> o usa l'AI Chat in basso a destra.</small>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}PEC {{ m.subject[:50] }} – GestFatture{% endblock %}
+
+{% block content %}
+{% set urg = m.urgency_label %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+  <div>
+    <a href="{{ url_for('pec_inbox') }}" class="text-muted small text-decoration-none">
+      <i class="bi bi-arrow-left me-1"></i> Torna all'inbox
+    </a>
+    <h2 class="mb-1 mt-2">
+      <i class="{{ m.sender_icon }} text-primary me-2"></i>{{ m.sender_label }}
+    </h2>
+    <div class="d-flex gap-2 align-items-center mt-1">
+      <span class="badge bg-{{ urg[1] }} fs-6">{{ urg[0] }}</span>
+      {% if m.category %}<span class="badge bg-light text-dark border">{{ m.category }}</span>{% endif %}
+      {% if m.deadline %}
+        <span class="badge bg-danger fs-6">⏰ Scadenza {{ m.deadline.strftime('%d/%m/%Y') }}</span>
+      {% endif %}
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <form action="{{ url_for('pec_archive', pid=m.id) }}" method="post">
+      <button class="btn btn-outline-secondary">
+        <i class="bi bi-archive me-1"></i> {% if m.is_archived %}Ripristina{% else %}Archivia{% endif %}
+      </button>
+    </form>
+    <form action="{{ url_for('pec_delete', pid=m.id) }}" method="post"
+          onsubmit="return confirm('Eliminare definitivamente questa PEC?')">
+      <button class="btn btn-outline-danger"><i class="bi bi-trash"></i></button>
+    </form>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Riassunto AI -->
+  <div class="col-lg-7">
+    {% if m.summary %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis">
+        <i class="bi bi-stars me-1"></i> Riassunto (AI)
+      </div>
+      <div class="card-body">
+        <p>{{ m.summary }}</p>
+        {% if m.key_facts_list %}
+        <hr>
+        <h6 class="fw-semibold">Fatti chiave</h6>
+        <ul class="mb-0">
+          {% for fact in m.key_facts_list %}
+          <li>{{ fact }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if m.suggested_action %}
+    <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+      <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+        <i class="bi bi-lightbulb me-1"></i> Azione consigliata
+      </div>
+      <div class="card-body">
+        {{ m.suggested_action }}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Body originale -->
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-envelope me-1"></i> Testo originale email
+      </div>
+      <div class="card-body">
+        <pre style="white-space:pre-wrap;font-family:inherit;font-size:13px;
+                    background:#f8fafc;padding:14px;border-radius:6px;
+                    max-height:400px;overflow-y:auto;margin:0">{{ m.body_excerpt }}</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dettagli laterale -->
+  <div class="col-lg-5">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">Dettagli messaggio</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-4">Mittente</dt>
+          <dd class="col-8 text-break">{{ m.sender }}</dd>
+          <dt class="col-4">Oggetto</dt>
+          <dd class="col-8"><strong>{{ m.subject }}</strong></dd>
+          <dt class="col-4">Ricevuto</dt>
+          <dd class="col-8">{{ m.received_at.strftime('%d/%m/%Y %H:%M') }}</dd>
+          {% if m.notified_at %}
+          <dt class="col-4">Notificato</dt>
+          <dd class="col-8 text-success">
+            <i class="bi bi-check-circle"></i> {{ m.notified_at.strftime('%d/%m/%Y %H:%M') }}
+          </dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+    {% if m.attachments_list %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-paperclip me-1"></i> Allegati ({{ m.attachments_list|length }})
+      </div>
+      <ul class="list-group list-group-flush">
+        {% for fname in m.attachments_list %}
+        <li class="list-group-item small">
+          {% if fname.lower().endswith('.pdf') %}<i class="bi bi-file-earmark-pdf-fill text-danger me-1"></i>
+          {% elif fname.lower().endswith('.xml') %}<i class="bi bi-filetype-xml text-success me-1"></i>
+          {% elif fname.lower().endswith('.zip') %}<i class="bi bi-file-zip-fill me-1"></i>
+          {% else %}<i class="bi bi-file-earmark me-1"></i>
+          {% endif %}
+          {{ fname }}
+        </li>
+        {% endfor %}
+      </ul>
+      <div class="card-footer text-muted small">
+        Gli allegati restano nella tua casella PEC originale.
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

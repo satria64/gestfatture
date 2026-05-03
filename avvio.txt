@@ -1,0 +1,2 @@
+cd "C:\Users\MARCO\Desktop\cloude code\invoice_manager"
+python app.py

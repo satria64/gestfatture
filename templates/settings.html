@@ -1,0 +1,334 @@
+{% extends "base.html" %}
+{% block title %}Impostazioni – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-gear me-2"></i>Impostazioni</h2>
+</div>
+
+<form method="post" style="max-width:640px">
+
+  <!-- Azienda (PERSONALE per ogni utente) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-success border-4">
+    <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+      <i class="bi bi-person-badge me-1"></i> Mio profilo
+      <span class="badge bg-success ms-2">personale</span>
+    </div>
+    <div class="card-body">
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Nome azienda / Mio brand</label>
+        <input type="text" name="company_name" class="form-control"
+               value="{{ settings.company_name }}" placeholder="La Tua Azienda Srl">
+        <div class="form-text">
+          Appare nell'intestazione dei solleciti email e PDF che <strong>tu</strong> invii.
+          Ogni utente ha il proprio.
+        </div>
+      </div>
+      <div>
+        <label class="form-label fw-semibold">Link pagamento predefinito</label>
+        <input type="url" name="payment_base_url" class="form-control"
+               value="{{ settings.payment_base_url }}" placeholder="https://pay.stripe.com/...">
+        <div class="form-text">Default per le tue fatture. Sovrascrivibile sulla singola fattura.</div>
+      </div>
+    </div>
+  </div>
+
+  {% if current_user.is_admin %}
+  <!-- URL pubblico app (necessario per i link nelle notifiche email/WhatsApp) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-globe me-1"></i> URL pubblico dell'app
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <label class="form-label fw-semibold">Indirizzo dell'app accessibile dall'esterno</label>
+      <input type="url" name="app_external_url" class="form-control"
+             value="{{ settings.app_external_url }}"
+             placeholder="https://gestfatture.tuodominio.it">
+      <div class="form-text">
+        Usato per costruire i link "azione rapida" nelle notifiche email/WhatsApp.
+        In sviluppo locale: <code>http://127.0.0.1:5000</code>.
+        In produzione: il tuo dominio pubblico (es. <code>https://app.tuodominio.it</code>).
+        <br>
+        ⚠️ Senza questo, i link nelle notifiche puntano a 127.0.0.1 e non sono cliccabili dal telefono.
+      </div>
+    </div>
+  </div>
+
+  <!-- SMTP (GLOBALE — solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-server me-1"></i> Server SMTP globale
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 mb-3">
+        <div class="col-sm-8">
+          <label class="form-label fw-semibold">Server SMTP</label>
+          <input type="text" name="smtp_host" class="form-control"
+                 value="{{ settings.smtp_host }}" placeholder="smtp.gmail.com">
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold">Porta</label>
+          <input type="number" name="smtp_port" class="form-control"
+                 value="{{ settings.smtp_port }}" placeholder="587">
+        </div>
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Indirizzo email mittente</label>
+        <input type="email" name="smtp_user" class="form-control"
+               value="{{ settings.smtp_user }}" placeholder="noreply@tuaazienda.it">
+      </div>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Password / App Password</label>
+        <input type="password" name="smtp_password" class="form-control"
+               value="{{ settings.smtp_password }}">
+        <div class="form-text">
+          Gmail → usa una <a href="https://myaccount.google.com/apppasswords" target="_blank">App Password</a> (non la password normale).
+          PEC → usa la password del tuo provider PEC.
+        </div>
+      </div>
+      <div>
+        <label class="form-label fw-semibold">Crittografia</label>
+        <select name="smtp_use_tls" class="form-select">
+          <option value="true"  {% if settings.smtp_use_tls == 'true'  %}selected{% endif %}>STARTTLS (porta 587)</option>
+          <option value="false" {% if settings.smtp_use_tls == 'false' %}selected{% endif %}>SSL/TLS (porta 465)</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Anthropic Claude API (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-primary border-4">
+    <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis">
+      <i class="bi bi-robot me-1"></i> Anthropic Claude API
+      <span class="badge bg-primary ms-2">Estrazione PDF intelligente</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info py-2 small mb-3">
+        Con la API key di Claude attiva, l'app legge i PDF caricati molto più
+        accuratamente: estrae cliente, P.IVA, indirizzo, importi, date e dati
+        di contatto anche dai PDF scansionati. Costo: <strong>~€0.01–0.02 per PDF</strong>.
+        <br>
+        Crea la chiave su
+        <a href="https://console.anthropic.com/settings/keys" target="_blank">
+          console.anthropic.com</a>
+        (richiede account + ricarica crediti, dai $5 di prova gratuita).
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">API key (sk-ant-…)</label>
+        <input type="password" name="anthropic_api_key" class="form-control"
+               value="{{ settings.anthropic_api_key }}"
+               placeholder="sk-ant-api03-...">
+        <div class="form-text">
+          Lasciala vuota per usare solo l'estrazione regex (gratis ma meno affidabile).
+        </div>
+      </div>
+
+      <div>
+        <label class="form-label fw-semibold">Modello</label>
+        <select name="anthropic_model" class="form-select">
+          <option value="">— Default (Sonnet 4.6) —</option>
+          <option value="claude-haiku-4-5-20251001"
+            {% if settings.anthropic_model == "claude-haiku-4-5-20251001" %}selected{% endif %}>
+            Haiku 4.5 — più veloce ed economico (~€0.005/PDF)
+          </option>
+          <option value="claude-sonnet-4-6"
+            {% if settings.anthropic_model == "claude-sonnet-4-6" %}selected{% endif %}>
+            Sonnet 4.6 — equilibrato, consigliato (~€0.02/PDF) ★
+          </option>
+          <option value="claude-opus-4-7"
+            {% if settings.anthropic_model == "claude-opus-4-7" %}selected{% endif %}>
+            Opus 4.7 — massima qualità (~€0.08/PDF)
+          </option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stripe Webhook (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-stripe me-1"></i> Stripe – Webhook
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <label class="form-label fw-semibold">Webhook Signing Secret</label>
+      <input type="password" name="stripe_webhook_secret" class="form-control"
+             value="{{ settings.stripe_webhook_secret }}" placeholder="whsec_...">
+      <div class="form-text">
+        Trovalo su <strong>dashboard.stripe.com → Sviluppatori → Webhook</strong>.<br>
+        Endpoint da registrare su Stripe:
+        <code>http://TUO-IP:5000/webhook/stripe</code><br>
+        Evento da abilitare: <code>checkout.session.completed</code> e <code>payment_intent.succeeded</code>.<br>
+        Nei metadata del Payment Link aggiungi: <code>invoice_id = &lt;ID o numero fattura&gt;</code>
+      </div>
+    </div>
+  </div>
+
+  <!-- PayPal Webhook (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      PayPal – Webhook
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <label class="form-label fw-semibold">Webhook ID</label>
+      <input type="text" name="paypal_webhook_id" class="form-control"
+             value="{{ settings.paypal_webhook_id }}" placeholder="ID webhook PayPal">
+      <div class="form-text">
+        Endpoint da registrare su PayPal Developer:
+        <code>http://TUO-IP:5000/webhook/paypal</code><br>
+        Nel campo <code>custom_id</code> del pagamento inserisci l'ID o il numero della fattura.
+      </div>
+    </div>
+  </div>
+  {% endif %}{# fine blocco admin-only #}
+
+  <button type="submit" class="btn btn-primary px-4">
+    <i class="bi bi-save me-1"></i> Salva impostazioni
+  </button>
+</form>
+
+<!-- ═════════════════════════════════════════════ PROFILO ═══════════════════ -->
+<form method="post" action="{{ url_for('update_profile') }}" style="max-width:640px" class="mt-5">
+  <div class="card border-0 shadow-sm">
+    <div class="card-header fw-semibold bg-info-subtle text-info-emphasis">
+      <i class="bi bi-person-circle me-1"></i> Mio profilo
+      <span class="badge bg-info ms-2">per ricevere notifiche</span>
+    </div>
+    <div class="card-body">
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Email personale</label>
+          <input type="email" name="email" class="form-control"
+                 value="{{ current_user.email }}" placeholder="tua@email.it">
+          <div class="form-text">Dove riceverai le notifiche di scadenza fatture.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Telefono WhatsApp</label>
+          <input type="tel" name="phone" class="form-control"
+                 value="{{ current_user.phone }}" placeholder="+393331234567">
+          <div class="form-text">Numero con prefisso internazionale (es. +39 per Italia).</div>
+        </div>
+      </div>
+      <button type="submit" class="btn btn-primary mt-3">
+        <i class="bi bi-save me-1"></i> Aggiorna profilo
+      </button>
+    </div>
+  </div>
+</form>
+
+<!-- ═════════════════════════════════════════════ NOTIFICHE ═════════════════ -->
+<form method="post" action="{{ url_for('save_notifications') }}" style="max-width:640px" class="mt-4">
+  <div class="card border-0 shadow-sm">
+    <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+      <i class="bi bi-bell-fill me-1"></i> Notifiche fatture scadute
+      <span class="badge bg-success ms-2">a te, non al cliente</span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">
+        Quando una tua fattura scade, ti avvisiamo subito. Ricevi un riassunto:
+        cliente, importo, giorni di ritardo. <strong>Le email/messaggi vanno a TE</strong>,
+        non al cliente (per quello esistono i solleciti).
+      </p>
+
+      <!-- Email toggle -->
+      <div class="form-check form-switch mb-3 ps-5">
+        <input class="form-check-input" type="checkbox" name="notify_email" id="notifyEmail"
+               {% if user_notify_email == 'true' %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="notifyEmail">
+          <i class="bi bi-envelope-fill me-1"></i> Notifiche via email
+        </label>
+        <div class="form-text">
+          Verranno inviate a <code>{{ current_user.email or "IMPOSTA EMAIL QUI SOPRA" }}</code>
+        </div>
+      </div>
+
+      <!-- WhatsApp toggle -->
+      <div class="form-check form-switch mb-3 ps-5">
+        <input class="form-check-input" type="checkbox" name="notify_whatsapp" id="notifyWa"
+               {% if user_notify_whatsapp == 'true' %}checked{% endif %}>
+        <label class="form-check-label fw-semibold" for="notifyWa">
+          <i class="bi bi-whatsapp text-success me-1"></i> Notifiche via WhatsApp
+        </label>
+        <div class="form-text">
+          Verranno inviate a <code>{{ current_user.phone or "IMPOSTA TELEFONO QUI SOPRA" }}</code>
+        </div>
+      </div>
+
+      <!-- WhatsApp API key -->
+      <div class="mb-3 ps-5">
+        <label class="form-label fw-semibold">CallMeBot API key
+          {% if user_whatsapp_apikey %}<span class="text-success">(impostata)</span>{% endif %}
+        </label>
+        <input type="password" name="whatsapp_apikey" class="form-control"
+               placeholder="{% if user_whatsapp_apikey %}lascia vuoto per non cambiare{% else %}123456 (numerica){% endif %}">
+        <div class="alert alert-info small mt-2 py-2">
+          <strong>Come ottenere la API key (gratis, 2 minuti):</strong>
+          <ol class="mb-0 mt-1 small">
+            <li>Aggiungi ai contatti del tuo telefono il numero
+              <strong>+34 644 51 95 23</strong> (CallMeBot)</li>
+            <li>Apri WhatsApp e mandagli questo messaggio (in inglese):<br>
+              <code>I allow callmebot to send me messages</code></li>
+            <li>Riceverai per WhatsApp la tua API key personale (un numero)</li>
+            <li>Incollala qui sopra e salva</li>
+          </ol>
+        </div>
+      </div>
+
+      <button type="submit" class="btn btn-primary">
+        <i class="bi bi-save me-1"></i> Salva preferenze
+      </button>
+
+      <!-- Test buttons -->
+      <div class="mt-3 pt-3 border-top">
+        <p class="small fw-semibold mb-2"><i class="bi bi-send-check me-1"></i> Test invio</p>
+        <div class="d-flex gap-2">
+          <form action="{{ url_for('test_notification') }}" method="post" class="d-inline">
+            <input type="hidden" name="channel" value="email">
+            <button class="btn btn-sm btn-outline-primary">
+              <i class="bi bi-envelope me-1"></i> Prova email
+            </button>
+          </form>
+          <form action="{{ url_for('test_notification') }}" method="post" class="d-inline">
+            <input type="hidden" name="channel" value="whatsapp">
+            <button class="btn btn-sm btn-outline-success">
+              <i class="bi bi-whatsapp me-1"></i> Prova WhatsApp
+            </button>
+          </form>
+        </div>
+        <small class="text-muted d-block mt-1">
+          Userà la prima fattura disponibile come esempio.
+        </small>
+      </div>
+    </div>
+  </div>
+</form>
+
+<!-- Cambio password -->
+<div class="card border-0 shadow-sm mt-4" style="max-width:640px">
+  <div class="card-header fw-semibold"><i class="bi bi-shield-lock me-1"></i> Cambia password</div>
+  <div class="card-body">
+    <form method="post" action="{{ url_for('change_password') }}">
+      <div class="row g-3">
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold">Password attuale</label>
+          <input type="password" name="old_password" class="form-control" required>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label fw-semibold">Nuova password</label>
+          <input type="password" name="new_password" class="form-control" required minlength="6">
+        </div>
+        <div class="col-sm-4 d-flex align-items-end">
+          <button class="btn btn-warning w-100">
+            <i class="bi bi-key me-1"></i> Aggiorna
+          </button>
+        </div>
+      </div>
+      <div class="form-text mt-2">Minimo 6 caratteri. Utente corrente: <strong>{{ current_user.username }}</strong></div>
+    </form>
+  </div>
+</div>
+{% endblock %}
