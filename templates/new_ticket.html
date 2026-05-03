@@ -17,6 +17,7 @@
 <div class="card border-0 shadow-sm" style="max-width:680px">
   <div class="card-body">
     <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3 mb-3">
         <div class="col-sm-6">
           <label class="form-label fw-semibold">Categoria</label>

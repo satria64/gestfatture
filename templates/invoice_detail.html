@@ -40,6 +40,7 @@
     </a>
     {% if inv.status != 'paid' %}
     <form action="{{ url_for('mark_paid', iid=inv.id) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-success"><i class="bi bi-check-circle me-1"></i> Segna pagata</button>
     </form>
     {% endif %}
@@ -137,6 +138,7 @@
       <div class="card-header fw-semibold"><i class="bi bi-send me-1"></i> Invia sollecito via email</div>
       <div class="card-body">
         <form action="{{ url_for('send_manual_reminder', iid=inv.id) }}" method="post" class="d-flex gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <select name="reminder_type" class="form-select">
             <option value="pre_scadenza">Promemoria pre-scadenza</option>
             <option value="sollecito_1">1° Sollecito</option>
@@ -190,6 +192,7 @@
     <div class="mt-3 text-end">
       <form action="{{ url_for('delete_invoice', iid=inv.id) }}" method="post"
             onsubmit="return confirm('Eliminare la fattura {{ inv.number }}?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="btn btn-outline-danger btn-sm">
           <i class="bi bi-trash me-1"></i> Elimina fattura
         </button>

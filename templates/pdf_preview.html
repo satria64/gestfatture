@@ -15,6 +15,7 @@
 </div>
 
 <form method="post" enctype="multipart/form-data" class="card border-0 shadow-sm mb-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card-body d-flex gap-2 align-items-center">
     <input type="file" name="file" class="form-control" accept=".pdf" required>
     <button class="btn btn-primary text-nowrap"><i class="bi bi-eye me-1"></i> Analizza</button>

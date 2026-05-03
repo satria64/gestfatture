@@ -3,16 +3,23 @@ import sys
 import logging
 from datetime import date, datetime
 
-from flask import (Flask, render_template, request, redirect,
+from flask import (Flask, render_template, request, redirect, session,
                    url_for, flash, jsonify, Response, abort, send_from_directory)
 from werkzeug.utils import secure_filename
 from functools import wraps
 from flask_login import login_required, login_user, logout_user, current_user
+from flask_wtf.csrf import CSRFProtect, generate_csrf
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
                     User, PecMessage, SupportTicket, TicketMessage)
 from auth import login_manager
 from config import config
+
+# Istanze globali — verranno collegate all'app in create_app()
+csrf    = CSRFProtect()
+limiter = Limiter(get_remote_address, default_limits=["1000 per hour"])
 
 
 # ─── Helpers multi-tenant: filtri per current_user ───────────────────────────
@@ -120,8 +127,45 @@ def create_app():
         # In produzione: forza HTTPS in url_for(_external=True)
         app.config["PREFERRED_URL_SCHEME"] = "https"
 
+    # ── Sicurezza ────────────────────────────────────────────────────────────
+    app.config["MAX_CONTENT_LENGTH"]   = 10 * 1024 * 1024   # 10 MB upload max
+    app.config["WTF_CSRF_TIME_LIMIT"]  = 3600 * 8           # 8h CSRF token
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    if os.environ.get("PORT") or os.environ.get("RENDER"):
+        app.config["SESSION_COOKIE_SECURE"] = True          # HTTPS-only in prod
+
     db.init_app(app)
     login_manager.init_app(app)
+    csrf.init_app(app)
+    limiter.init_app(app)
+
+    # ── Header sicurezza HTTP ────────────────────────────────────────────────
+    @app.after_request
+    def add_security_headers(resp):
+        resp.headers["X-Frame-Options"]        = "DENY"
+        resp.headers["X-Content-Type-Options"] = "nosniff"
+        resp.headers["Referrer-Policy"]        = "strict-origin-when-cross-origin"
+        resp.headers["Permissions-Policy"]     = "geolocation=(), microphone=(), camera=()"
+        # HSTS solo in produzione (HTTPS)
+        if request.is_secure or app.config.get("SESSION_COOKIE_SECURE"):
+            resp.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # CSP — permette CDN Bootstrap, inline (per chat widget) e immagini varie
+        resp.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "font-src 'self' https://cdn.jsdelivr.net data:; "
+            "img-src 'self' data: https:; "
+            "connect-src 'self'; "
+            "frame-ancestors 'none';"
+        )
+        return resp
+
+    # Esponi csrf_token() in tutti i template Jinja
+    @app.context_processor
+    def inject_csrf():
+        return {"csrf_token": generate_csrf}
 
     with app.app_context():
         db.create_all()
@@ -149,6 +193,7 @@ def create_app():
     # AUTH
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/login", methods=["GET", "POST"])
+    @limiter.limit("10 per minute", methods=["POST"])
     def login():
         if current_user.is_authenticated:
             return redirect(url_for("dashboard"))
@@ -196,6 +241,7 @@ def create_app():
         return redirect(url_for("login"))
 
     @app.route("/login/guest")
+    @limiter.limit("5 per minute")
     def login_as_guest():
         """Crea un account ospite temporaneo per chi vuole testare l'app.
         Ogni accesso crea un utente nuovo con dati separati."""
@@ -783,6 +829,7 @@ def create_app():
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/api/chat", methods=["POST"])
     @login_required
+    @limiter.limit("30 per minute")
     def chat_api():
         from claude_service import chat_response
         data = request.json or {}
@@ -978,10 +1025,34 @@ def create_app():
             flash(f"Stato aggiornato a '{t.status_label[0]}'.", "info")
         return redirect(url_for("ticket_detail", tid=tid))
 
+    # ── Test Claude API key (verifica che funzioni con 1 chiamata) ───────────
+    @app.route("/settings/test-claude", methods=["POST"])
+    @admin_required
+    def test_claude_api():
+        api_key = AppSettings.get("anthropic_api_key", "")
+        if not api_key:
+            flash("⚠️ API key non configurata.", "warning")
+            return redirect(url_for("settings"))
+        try:
+            import anthropic
+            client = anthropic.Anthropic(api_key=api_key)
+            resp = client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=20,
+                messages=[{"role": "user", "content": "Rispondi solo: OK"}],
+            )
+            answer = resp.content[0].text[:80]
+            flash(f"✅ Claude API funziona. Risposta: «{answer}»", "success")
+        except Exception as e:
+            flash(f"❌ Claude API errore: {type(e).__name__}: {e}", "danger")
+        return redirect(url_for("settings"))
+
     # ═══════════════════════════════════════════════════════════════════════════
-    # WEBHOOK STRIPE
+    # WEBHOOK STRIPE (esentato da CSRF — Stripe non manda token CSRF)
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/webhook/stripe", methods=["POST"])
+    @csrf.exempt
+    @limiter.limit("60 per minute")
     def webhook_stripe():
         import stripe
         payload    = request.get_data()
@@ -1022,9 +1093,11 @@ def create_app():
         return jsonify({"status": "ok"})
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # WEBHOOK PAYPAL
+    # WEBHOOK PAYPAL (esentato da CSRF)
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/webhook/paypal", methods=["POST"])
+    @csrf.exempt
+    @limiter.limit("60 per minute")
     def webhook_paypal():
         data       = request.json or {}
         event_type = data.get("event_type", "")
@@ -1312,18 +1385,34 @@ def create_app():
     @app.route("/my-integrations/fic/connect")
     @login_required
     def my_fic_connect():
+        import secrets as _secrets
         from integration_fic import get_authorize_url
         cid = AppSettings.get("integration_fic_client_id", "")
         if not cid:
             flash("L'amministratore non ha ancora configurato l'app Fatture in Cloud.", "warning")
             return redirect(url_for("my_integrations"))
+        # Genera state casuale + salva in sessione (anti-CSRF su OAuth)
+        state = _secrets.token_urlsafe(32)
+        session["fic_oauth_state"] = state
+        session["fic_oauth_user_id"] = current_user.id
         redirect_uri = url_for("my_fic_callback", _external=True)
-        return redirect(get_authorize_url(cid, redirect_uri, state=f"u{current_user.id}"))
+        return redirect(get_authorize_url(cid, redirect_uri, state=state))
 
     @app.route("/my-integrations/fic/callback")
     @login_required
     def my_fic_callback():
         from integration_fic import exchange_code, get_companies
+        # Verifica state OAuth (anti-CSRF)
+        received_state = request.args.get("state", "")
+        expected_state = session.pop("fic_oauth_state", None)
+        expected_uid   = session.pop("fic_oauth_user_id", None)
+        if not expected_state or received_state != expected_state:
+            flash("⚠️ Errore di sicurezza: state OAuth non valido. Riprova.", "danger")
+            return redirect(url_for("my_integrations"))
+        if expected_uid != current_user.id:
+            flash("⚠️ Errore di sicurezza: utente diverso da quello che ha avviato l'autorizzazione.", "danger")
+            return redirect(url_for("my_integrations"))
+
         code = request.args.get("code")
         if not code:
             flash("Autorizzazione annullata o non valida.", "danger")

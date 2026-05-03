@@ -7,6 +7,7 @@
   <div class="d-flex gap-2">
     <form action="{{ url_for('merge_duplicate_clients') }}" method="post"
           onsubmit="return confirm('Unisci i clienti che hanno la stessa P.IVA? Le fatture verranno spostate sul cliente più vecchio.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-outline-warning" title="Unisci clienti con stessa P.IVA">
         <i class="bi bi-magic me-1"></i> Unifica duplicati
       </button>

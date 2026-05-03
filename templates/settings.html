@@ -7,6 +7,7 @@
 </div>
 
 <form method="post" style="max-width:640px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
   <!-- Azienda (PERSONALE per ogni utente) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-success border-4">
@@ -191,8 +192,21 @@
   </button>
 </form>
 
+{% if current_user.is_admin %}
+<!-- Test Claude API key (verifica chiamata di prova) -->
+<form method="post" action="{{ url_for('test_claude_api') }}" style="max-width:640px" class="mt-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <button type="submit" class="btn btn-outline-primary btn-sm">
+    <i class="bi bi-stars me-1"></i> Test Claude API
+  </button>
+  <small class="text-muted ms-2">Verifica che la API key Claude sia valida con una chiamata di prova</small>
+</form>
+{% endif %}
+
 <!-- ═════════════════════════════════════════════ PROFILO ═══════════════════ -->
 <form method="post" action="{{ url_for('update_profile') }}" style="max-width:640px" class="mt-5">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card border-0 shadow-sm">
     <div class="card-header fw-semibold bg-info-subtle text-info-emphasis">
       <i class="bi bi-person-circle me-1"></i> Mio profilo
@@ -236,6 +250,7 @@
 
 <!-- ═════════════════════════════════════════════ NOTIFICHE ═════════════════ -->
 <form method="post" action="{{ url_for('save_notifications') }}" style="max-width:640px" class="mt-4">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card border-0 shadow-sm">
     <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
       <i class="bi bi-bell-fill me-1"></i> Notifiche fatture scadute
@@ -301,12 +316,14 @@
         <p class="small fw-semibold mb-2"><i class="bi bi-send-check me-1"></i> Test invio</p>
         <div class="d-flex gap-2">
           <form action="{{ url_for('test_notification') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="channel" value="email">
             <button class="btn btn-sm btn-outline-primary">
               <i class="bi bi-envelope me-1"></i> Prova email
             </button>
           </form>
           <form action="{{ url_for('test_notification') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="channel" value="whatsapp">
             <button class="btn btn-sm btn-outline-success">
               <i class="bi bi-whatsapp me-1"></i> Prova WhatsApp
@@ -326,6 +343,7 @@
   <div class="card-header fw-semibold"><i class="bi bi-shield-lock me-1"></i> Cambia password</div>
   <div class="card-body">
     <form method="post" action="{{ url_for('change_password') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="row g-3">
         <div class="col-sm-4">
           <label class="form-label fw-semibold">Password attuale</label>

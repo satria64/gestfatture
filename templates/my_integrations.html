@@ -38,6 +38,7 @@
           vengono importati e spostati in <code>processed/</code>.
         </p>
         <form action="{{ url_for('my_save_folder') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="form-check form-switch mb-3">
             <input class="form-check-input" type="checkbox" name="enabled" id="folderEnabled"
                    {% if s.integration_folder_enabled == 'true' %}checked{% endif %}>
@@ -55,10 +56,12 @@
         </form>
         <hr>
         <form action="{{ url_for('my_test_folder') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="path" value="{{ s.integration_folder_path }}">
           <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-check-circle me-1"></i> Test</button>
         </form>
         <form action="{{ url_for('my_sync_folder') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-clockwise me-1"></i> Esegui scansione ora</button>
         </form>
         {% if s.integration_folder_last_sync %}
@@ -80,6 +83,7 @@
           La tua casella PEC verrà controllata ogni 5 minuti. Solo tu vedi le fatture importate.
         </p>
         <form action="{{ url_for('my_save_pec') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="form-check form-switch mb-3">
             <input class="form-check-input" type="checkbox" name="enabled" id="pecEnabled"
                    {% if s.integration_pec_enabled == 'true' %}checked{% endif %}>
@@ -143,9 +147,11 @@
         </form>
         <hr>
         <form action="{{ url_for('my_test_pec') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-secondary"><i class="bi bi-plug me-1"></i> Test connessione</button>
         </form>
         <form action="{{ url_for('my_sync_pec') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-success"><i class="bi bi-arrow-clockwise me-1"></i> Sincronizza ora</button>
         </form>
         {% if s.integration_pec_last_sync %}
@@ -182,6 +188,7 @@
             Sincronizza ogni 30 minuti le tue fatture emesse e ricevute dal tuo account Fatture in Cloud.
           </p>
           <form action="{{ url_for('my_save_fic') }}" method="post" class="mb-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-check form-switch">
               <input class="form-check-input" type="checkbox" name="enabled" id="ficEnabled"
                      {% if s.integration_fic_enabled == 'true' %}checked{% endif %}>
@@ -196,10 +203,12 @@
               Account collegato — Azienda ID: <code>{{ s.integration_fic_company_id or '?' }}</code>
             </div>
             <form action="{{ url_for('my_sync_fic') }}" method="post" class="d-inline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-success"><i class="bi bi-arrow-clockwise me-1"></i> Sincronizza ora</button>
             </form>
             <form action="{{ url_for('my_fic_disconnect') }}" method="post" class="d-inline"
                   onsubmit="return confirm('Disconnettere il tuo account?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-danger"><i class="bi bi-plug me-1"></i> Disconnetti</button>
             </form>
             {% if s.integration_fic_last_sync %}

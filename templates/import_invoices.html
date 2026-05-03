@@ -21,6 +21,7 @@
       <div class="card-header fw-semibold">Carica file</div>
       <div class="card-body">
         <form method="post" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <div class="mb-4">
             <label class="form-label fw-semibold">File CSV, Excel, PDF, XML o ZIP</label>
             <input type="file" name="file" class="form-control"

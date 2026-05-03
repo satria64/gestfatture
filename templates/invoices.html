@@ -71,6 +71,7 @@
           <div class="d-flex gap-1 justify-content-end">
             {% if inv.status != 'paid' %}
             <form action="{{ url_for('mark_paid', iid=inv.id) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-success" title="Segna pagata">
                 <i class="bi bi-check-lg"></i>
               </button>

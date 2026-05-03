@@ -25,6 +25,7 @@
 
     {% if current_user.is_admin %}
     <form method="post" action="{{ url_for('change_ticket_status', tid=ticket.id) }}" class="d-flex gap-2">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <select name="status" class="form-select form-select-sm" style="width:auto">
         <option value="open"         {% if ticket.status == 'open'         %}selected{% endif %}>🔵 Aperto</option>
         <option value="in_progress"  {% if ticket.status == 'in_progress'  %}selected{% endif %}>⚙️ In lavorazione</option>
@@ -77,6 +78,7 @@
   <div class="card-header fw-semibold"><i class="bi bi-reply me-1"></i> Rispondi</div>
   <div class="card-body">
     <form method="post" action="{{ url_for('reply_ticket', tid=ticket.id) }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <textarea name="body" class="form-control mb-3" rows="4" required
                 placeholder="Scrivi la tua risposta…"></textarea>
 
