@@ -1,0 +1,221 @@
+{% extends 'base.html' %}
+{% block title %}Sottoscrizione – GestFatture{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <h2 class="mb-0">
+    <i class="bi bi-credit-card-2-front me-2"></i> Sottoscrizione
+  </h2>
+  {% set lbl, color = current_user.subscription_label %}
+  <span class="badge bg-{{ color }} fs-6 px-3 py-2">{{ lbl }}</span>
+</div>
+
+<div class="row g-4">
+
+  <!-- ─── Card stato attuale ─── -->
+  <div class="col-lg-7">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h5 class="card-title mb-3">
+          <i class="bi bi-info-circle me-1 text-primary"></i> Stato del tuo account
+        </h5>
+
+        {% if current_user.is_admin %}
+          <div class="alert alert-info mb-3">
+            <i class="bi bi-shield-check me-1"></i>
+            Sei l'<strong>amministratore</strong> dell'istanza GestFatture.
+            Non hai bisogno di una sottoscrizione personale.
+          </div>
+        {% elif current_user.is_guest %}
+          <div class="alert alert-warning mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            Sei in <strong>modalità ospite</strong>. I dati saranno cancellati al logout.
+            Per continuare ad usare GestFatture, registra un account vero.
+          </div>
+          <a href="{{ url_for('register') }}" class="btn btn-primary">
+            <i class="bi bi-person-plus me-1"></i> Registrati
+          </a>
+        {% else %}
+          <dl class="row mb-0">
+            <dt class="col-sm-5 text-muted">Piano</dt>
+            <dd class="col-sm-7">
+              {% if current_user.plan == 'pro' %}
+                <strong>GestFatture Pro</strong> — €15/mese
+              {% elif current_user.plan == 'trial' %}
+                <strong>Prova gratuita</strong>
+              {% elif current_user.plan == 'expired' %}
+                <strong class="text-danger">Sottoscrizione disdetta</strong>
+              {% else %}
+                <strong>—</strong>
+              {% endif %}
+            </dd>
+
+            <dt class="col-sm-5 text-muted">Stato Stripe</dt>
+            <dd class="col-sm-7">
+              {% if current_user.subscription_status %}
+                <code>{{ current_user.subscription_status }}</code>
+              {% else %}
+                <span class="text-muted">Mai sottoscritto</span>
+              {% endif %}
+            </dd>
+
+            {% if current_user.is_in_trial %}
+              <dt class="col-sm-5 text-muted">Periodo di prova</dt>
+              <dd class="col-sm-7">
+                {% if current_user.days_left_in_trial is not none %}
+                  Restano <strong>{{ current_user.days_left_in_trial }} giorni</strong>
+                  {% if current_user.trial_ends_at %}
+                    (fino al {{ current_user.trial_ends_at.strftime('%d/%m/%Y') }})
+                  {% endif %}
+                {% else %}
+                  In corso
+                {% endif %}
+              </dd>
+            {% endif %}
+
+            {% if current_user.current_period_end %}
+              <dt class="col-sm-5 text-muted">Prossimo rinnovo</dt>
+              <dd class="col-sm-7">
+                {{ current_user.current_period_end.strftime('%d/%m/%Y') }}
+              </dd>
+            {% endif %}
+
+            <dt class="col-sm-5 text-muted">Account creato</dt>
+            <dd class="col-sm-7">
+              {% if current_user.created_at %}
+                {{ current_user.created_at.strftime('%d/%m/%Y') }}
+              {% else %}—{% endif %}
+            </dd>
+          </dl>
+
+          <hr class="my-4">
+
+          <!-- Bottoni azione in base allo stato -->
+          {% if not has_stripe_configured %}
+            <div class="alert alert-warning mb-0">
+              <i class="bi bi-exclamation-triangle me-1"></i>
+              Il sistema di pagamento non è ancora configurato.
+              {% if current_user.is_admin %}
+                Vai in <a href="{{ url_for('settings') }}">Impostazioni</a> per inserire le chiavi Stripe.
+              {% else %}
+                Riprova tra qualche minuto o contatta l'assistenza.
+              {% endif %}
+            </div>
+          {% elif current_user.subscription_status in ('trialing', 'active') %}
+            <form method="post" action="{{ url_for('billing_portal') }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-primary" type="submit">
+                <i class="bi bi-gear me-1"></i> Gestisci sottoscrizione
+              </button>
+            </form>
+            <small class="text-muted ms-2">
+              Cambia metodo di pagamento, scarica fatture o disdici.
+            </small>
+          {% elif current_user.subscription_status in ('past_due', 'unpaid', 'incomplete') %}
+            <form method="post" action="{{ url_for('billing_portal') }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-warning" type="submit">
+                <i class="bi bi-exclamation-circle me-1"></i> Aggiorna metodo di pagamento
+              </button>
+            </form>
+          {% else %}
+            {# Mai sottoscritto, oppure canceled/expired #}
+            <a href="{{ url_for('billing_checkout') }}" class="btn btn-primary btn-lg">
+              <i class="bi bi-rocket-takeoff me-1"></i>
+              {% if current_user.stripe_subscription_id %}
+                Riattiva sottoscrizione
+              {% else %}
+                Inizia 30 giorni gratis
+              {% endif %}
+            </a>
+            <small class="d-block text-muted mt-2">
+              Carta richiesta. Nessun addebito per i primi 30 giorni. Disdici quando vuoi.
+            </small>
+          {% endif %}
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Card piano ─── -->
+  <div class="col-lg-5">
+    <div class="card shadow-sm h-100">
+      <div class="card-body">
+        <h5 class="card-title mb-3">
+          <i class="bi bi-box-seam me-1 text-primary"></i> GestFatture Pro
+        </h5>
+        <p class="display-6 mb-0">€ 15 <small class="text-muted fs-6">/mese</small></p>
+        <p class="text-muted small mb-3">IVA esclusa</p>
+        <ul class="list-unstyled mb-0">
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Clienti e fatture illimitate</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Solleciti automatici email + WhatsApp</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Import PDF, XML FatturaPA, CSV, ZIP</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Riconciliazione bancaria PSD2</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Cash flow forecast 12 settimane</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Calendario scadenze fiscali</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> PEC istituzionali AdE/INPS/INAIL</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Bandi di finanziamento personalizzati</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> Customer portal pubblico per i tuoi clienti</li>
+          <li class="mb-2"><i class="bi bi-check2-circle text-success me-2"></i> 2FA, GDPR, backup S3, audit log</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── FAQ rapide ─── -->
+<div class="card shadow-sm mt-4">
+  <div class="card-body">
+    <h5 class="card-title mb-3">
+      <i class="bi bi-question-circle me-1 text-primary"></i> Domande frequenti
+    </h5>
+    <div class="accordion accordion-flush" id="billingFaq">
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#faq1">
+            Posso disdire in qualsiasi momento?
+          </button>
+        </h2>
+        <div id="faq1" class="accordion-collapse collapse" data-bs-parent="#billingFaq">
+          <div class="accordion-body">
+            Sì. Click su "Gestisci sottoscrizione" e poi sull'opzione di cancellazione.
+            Avrai accesso fino alla fine del periodo già pagato.
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#faq2">
+            Cosa succede se disdico durante la prova?
+          </button>
+        </h2>
+        <div id="faq2" class="accordion-collapse collapse" data-bs-parent="#billingFaq">
+          <div class="accordion-body">
+            Nessun addebito. La prova continua fino alla scadenza dei 30 giorni
+            e poi l'account viene messo in pausa. Puoi riattivarlo quando vuoi.
+          </div>
+        </div>
+      </div>
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#faq3">
+            Cosa succede se chiudo l'account?
+          </button>
+        </h2>
+        <div id="faq3" class="accordion-collapse collapse" data-bs-parent="#billingFaq">
+          <div class="accordion-body">
+            Puoi cancellare definitivamente l'account dalle
+            <a href="{{ url_for('settings') }}">Impostazioni</a> → "Cancella account
+            (GDPR)". I tuoi dati saranno eliminati. Prima puoi
+            <a href="{{ url_for('account_export') }}">scaricarli in ZIP</a>.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

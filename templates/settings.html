@@ -202,6 +202,88 @@
     </div>
   </div>
 
+  <!-- Stripe Sottoscrizione SaaS (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-success border-4">
+    <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+      <i class="bi bi-credit-card-2-front me-1"></i> Stripe – Sottoscrizione SaaS (signup pubblico)
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">
+        Configura Stripe per gli abbonamenti del piano <strong>GestFatture Pro €15/mese</strong>.
+        I nuovi utenti registrati su <code>/register</code> verranno reindirizzati a Stripe Checkout
+        con 30 giorni di prova gratuita.
+      </p>
+
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Stripe Secret Key</label>
+          <input type="password" name="stripe_secret_key" class="form-control"
+                 placeholder="sk_live_... (lascia vuoto per non modificare)">
+          <div class="form-text">
+            Trovala su <a href="https://dashboard.stripe.com/apikeys" target="_blank">
+              dashboard.stripe.com → Sviluppatori → Chiavi API</a>.
+            Usa <strong>Live</strong> in produzione, <strong>Test</strong> per provare.
+          </div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Stripe Publishable Key</label>
+          <input type="text" name="stripe_publishable_key" class="form-control"
+                 value="{{ settings.stripe_publishable_key }}"
+                 placeholder="pk_live_...">
+          <div class="form-text">
+            Chiave pubblica (può essere mostrata al client).
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-md-8">
+          <label class="form-label fw-semibold">Stripe Price ID (piano €15/mese)</label>
+          <input type="text" name="stripe_price_id" class="form-control"
+                 value="{{ settings.stripe_price_id }}"
+                 placeholder="price_...">
+          <div class="form-text">
+            Crea il prodotto su <a href="https://dashboard.stripe.com/products" target="_blank">
+              dashboard.stripe.com → Prodotti</a> con prezzo <strong>ricorrente €15/mese</strong>
+            e copia qui il <code>price_id</code>.
+          </div>
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Registrazioni pubbliche</label>
+          <select name="signup_enabled" class="form-select">
+            <option value="true"  {% if settings.signup_enabled != 'false' %}selected{% endif %}>
+              Abilitate
+            </option>
+            <option value="false" {% if settings.signup_enabled == 'false' %}selected{% endif %}>
+              Disabilitate
+            </option>
+          </select>
+          <div class="form-text">
+            Se disattivate, <code>/register</code> reindirizza al login.
+          </div>
+        </div>
+      </div>
+
+      <div class="alert alert-info small mt-3 mb-0">
+        <strong>Setup Stripe — checklist:</strong>
+        <ol class="mb-0 mt-2">
+          <li>Crea il prodotto "GestFatture Pro" con prezzo ricorrente €15/mese</li>
+          <li>Configura il Customer Portal: Stripe Dashboard → Settings → Billing → Customer portal (abilita "Cancellazione subscription" e "Aggiornamento metodi di pagamento")</li>
+          <li>Webhook endpoint:
+            <code>{{ settings.app_external_url or 'https://app.gestfatture.com' }}/webhook/stripe</code>
+            con eventi:
+            <code>checkout.session.completed</code>,
+            <code>customer.subscription.*</code>,
+            <code>invoice.paid</code>,
+            <code>invoice.payment_failed</code>
+          </li>
+          <li>Inserisci la Webhook Signing Secret nella sezione qui sotto</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+
   <!-- Stripe Webhook (solo admin) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
@@ -215,9 +297,17 @@
       <div class="form-text">
         Trovalo su <strong>dashboard.stripe.com → Sviluppatori → Webhook</strong>.<br>
         Endpoint da registrare su Stripe:
-        <code>http://TUO-IP:5000/webhook/stripe</code><br>
-        Evento da abilitare: <code>checkout.session.completed</code> e <code>payment_intent.succeeded</code>.<br>
-        Nei metadata del Payment Link aggiungi: <code>invoice_id = &lt;ID o numero fattura&gt;</code>
+        <code>{{ settings.app_external_url or 'https://app.gestfatture.com' }}/webhook/stripe</code><br>
+        Eventi da abilitare:
+        <code>checkout.session.completed</code>,
+        <code>payment_intent.succeeded</code>,
+        <code>customer.subscription.created</code>,
+        <code>customer.subscription.updated</code>,
+        <code>customer.subscription.deleted</code>,
+        <code>invoice.paid</code>,
+        <code>invoice.payment_failed</code>.<br>
+        <strong>Nota</strong>: lo stesso webhook gestisce sia i pagamenti delle tue fatture
+        clienti, sia le sottoscrizioni del SaaS.
       </div>
     </div>
   </div>

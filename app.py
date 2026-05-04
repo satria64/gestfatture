@@ -255,6 +255,45 @@ def create_app():
         session["_last_activity"] = now
         session.permanent = True
 
+    # ── Enforcer sottoscrizione: blocca accesso se trial scaduto / sub inattiva ──
+    # Endpoint sempre permessi anche senza sub valida (login, billing, GDPR, public)
+    SUBSCRIPTION_FREE_ENDPOINTS = {
+        "login", "login_2fa", "login_as_guest", "logout",
+        "register", "register_thanks",
+        "privacy", "terms", "favicon",
+        "billing", "billing_checkout", "billing_portal", "checkout_success",
+        "account_export", "account_delete",
+        "settings_2fa_setup", "settings_2fa_setup_verify",
+        "settings_2fa_disable", "settings_2fa_regenerate",
+        "change_password",
+    }
+
+    @app.before_request
+    def enforce_subscription():
+        if not current_user.is_authenticated:
+            return
+        ep = request.endpoint or ""
+        if ep in SUBSCRIPTION_FREE_ENDPOINTS:
+            return
+        if ep.startswith("static") or ep.startswith("webhook"):
+            return
+        # Quick action firmate, customer portal, survey: non hanno login_required
+        if ep.startswith("portal_") or ep.startswith("quick_") or ep.startswith("survey_"):
+            return
+        if current_user.has_active_subscription:
+            return
+        # Sub scaduta: redirect a /billing con flash
+        if request.method == "GET" and ep != "billing":
+            flash(
+                "⚠️ Il tuo periodo di prova è terminato o la sottoscrizione "
+                "non è attiva. Riattivala per continuare a usare GestFatture.",
+                "warning",
+            )
+            return redirect(url_for("billing"))
+        # Per le POST, blocca con 402 (Payment Required)
+        if request.method != "GET":
+            abort(402)
+
     with app.app_context():
         db.create_all()
         _migrate_db()
@@ -428,6 +467,88 @@ def create_app():
             "info",
         )
         return redirect(url_for("dashboard"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SIGNUP PUBBLICO (registrazione self-service → Stripe Checkout)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/register", methods=["GET", "POST"])
+    @limiter.limit("5 per minute", methods=["POST"])
+    def register():
+        if current_user.is_authenticated:
+            return redirect(url_for("dashboard"))
+
+        signup_enabled = AppSettings.get("signup_enabled", "true") == "true"
+        if not signup_enabled:
+            flash("Le registrazioni pubbliche sono temporaneamente disabilitate.", "warning")
+            return redirect(url_for("login"))
+
+        if request.method == "POST":
+            username     = request.form.get("username", "").strip().lower()
+            email        = request.form.get("email", "").strip().lower()
+            password     = request.form.get("password", "")
+            company_name = request.form.get("company_name", "").strip()
+            vat_raw      = request.form.get("vat_number", "")
+            vat_number   = "".join(c for c in vat_raw if c.isdigit())
+            terms_ok     = request.form.get("terms") == "on"
+
+            errors = []
+            if len(username) < 3 or not all(c.isalnum() or c in "_-." for c in username):
+                errors.append("Username: minimo 3 caratteri (lettere, numeri, _ - .)")
+            if "@" not in email or "." not in email.split("@", 1)[-1]:
+                errors.append("Email non valida.")
+            ok, err = User.validate_password(password)
+            if not ok:
+                errors.append(err)
+            if not company_name:
+                errors.append("Inserisci la ragione sociale.")
+            if len(vat_number) != 11:
+                errors.append("La P.IVA deve essere di 11 cifre.")
+            if not terms_ok:
+                errors.append("Devi accettare i Termini di servizio e la Privacy Policy.")
+            if username and User.query.filter_by(username=username).first():
+                errors.append("Username già in uso, scegline un altro.")
+            if email and User.query.filter(User.email == email, User.email != "").first():
+                errors.append("Email già registrata. Effettua il login o reimposta la password.")
+
+            if errors:
+                for e in errors:
+                    flash(e, "danger")
+                audit("signup_failed", target=f"user:{username}",
+                      details=" | ".join(errors)[:500])
+                return render_template("register.html",
+                                       username=username, email=email,
+                                       company_name=company_name, vat_number=vat_number)
+
+            user = User(
+                username=username,
+                email=email,
+                is_admin=False,
+                plan="trial",
+            )
+            user.set_password(password)
+            db.session.add(user)
+            db.session.commit()
+
+            # Salva company_name e P.IVA come UserSetting (compat. con codice esistente)
+            UserSetting.set(user.id, "company_name", company_name)
+            UserSetting.set(user.id, "my_vat_number", vat_number)
+
+            audit("signup_public", target=f"user:{username}", user=user,
+                  details=f"company:{company_name[:80]}")
+
+            login_user(user)
+
+            try:
+                _send_welcome_email(user, company_name)
+            except Exception as e:
+                logging.warning("Welcome email fallita: %s", e)
+
+            # Reindirizza a Stripe Checkout per attivare la sub (carta + trial 30gg)
+            flash(f"🎉 Account creato. Aggiungi la carta per iniziare i 30 giorni di prova.",
+                  "success")
+            return redirect(url_for("billing_checkout"))
+
+        return render_template("register.html")
 
     @app.route("/settings/change-password", methods=["POST"])
     @login_required
@@ -2524,6 +2645,111 @@ def create_app():
         return redirect(url_for("settings"))
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # BILLING / SOTTOSCRIZIONE SaaS (Stripe Checkout + Customer Portal)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/billing")
+    @login_required
+    def billing():
+        has_stripe_keys = bool(AppSettings.get("stripe_secret_key", "")
+                               and AppSettings.get("stripe_price_id", ""))
+        return render_template(
+            "billing.html",
+            has_stripe_configured=has_stripe_keys,
+        )
+
+    @app.route("/billing/checkout", methods=["GET", "POST"])
+    @login_required
+    @limiter.limit("10 per hour")
+    def billing_checkout():
+        """Crea una Stripe Checkout Session (mode=subscription) per attivare/rinnovare."""
+        import stripe
+        secret   = AppSettings.get("stripe_secret_key", "")
+        price_id = AppSettings.get("stripe_price_id", "")
+        if not secret or not price_id:
+            flash("⚠️ Il sistema di pagamento non è ancora configurato. Riprova più tardi.",
+                  "warning")
+            return redirect(url_for("billing"))
+
+        stripe.api_key = secret
+        base_url = (AppSettings.get("app_external_url", "").rstrip("/")
+                    or request.host_url.rstrip("/"))
+        company_name = UserSetting.get(current_user.id, "company_name") or current_user.username
+
+        # Crea (o riusa) il Customer Stripe
+        if not current_user.stripe_customer_id:
+            try:
+                cust = stripe.Customer.create(
+                    email=current_user.email or None,
+                    name=company_name,
+                    metadata={"user_id": str(current_user.id),
+                              "username": current_user.username},
+                )
+                current_user.stripe_customer_id = cust.id
+                db.session.commit()
+            except Exception as e:
+                logging.exception("Stripe customer creation failed")
+                flash(f"❌ Errore Stripe: {e}", "danger")
+                return redirect(url_for("billing"))
+
+        # Crea la Checkout Session
+        sub_data = {"metadata": {"user_id": str(current_user.id),
+                                 "purpose": "gestfatture_signup"}}
+        # Trial 30gg solo se l'utente non ha mai avuto una sub completata
+        if not current_user.stripe_subscription_id:
+            sub_data["trial_period_days"] = 30
+        try:
+            session_obj = stripe.checkout.Session.create(
+                customer=current_user.stripe_customer_id,
+                mode="subscription",
+                line_items=[{"price": price_id, "quantity": 1}],
+                payment_method_collection="always",
+                subscription_data=sub_data,
+                success_url=f"{base_url}/checkout/success?session_id={{CHECKOUT_SESSION_ID}}",
+                cancel_url=f"{base_url}/billing",
+                allow_promotion_codes=True,
+                locale="it",
+                metadata={"user_id": str(current_user.id),
+                          "purpose": "gestfatture_signup"},
+            )
+            audit("checkout_started", target=f"user:{current_user.username}")
+            return redirect(session_obj.url, code=303)
+        except Exception as e:
+            logging.exception("Stripe Checkout creation failed")
+            flash(f"❌ Errore Stripe: {e}", "danger")
+            return redirect(url_for("billing"))
+
+    @app.route("/billing/portal", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per hour")
+    def billing_portal():
+        """Apre Stripe Customer Portal (gestione metodo pagamento + cancellazione)."""
+        import stripe
+        secret = AppSettings.get("stripe_secret_key", "")
+        if not secret or not current_user.stripe_customer_id:
+            flash("Nessuna sottoscrizione da gestire.", "warning")
+            return redirect(url_for("billing"))
+        stripe.api_key = secret
+        base_url = (AppSettings.get("app_external_url", "").rstrip("/")
+                    or request.host_url.rstrip("/"))
+        try:
+            portal = stripe.billing_portal.Session.create(
+                customer=current_user.stripe_customer_id,
+                return_url=f"{base_url}/billing",
+            )
+            audit("billing_portal_open", target=f"user:{current_user.username}")
+            return redirect(portal.url, code=303)
+        except Exception as e:
+            logging.exception("Stripe Customer Portal failed")
+            flash(f"❌ Errore: {e}", "danger")
+            return redirect(url_for("billing"))
+
+    @app.route("/checkout/success")
+    @login_required
+    def checkout_success():
+        """Atterraggio dopo Stripe Checkout. Lo stato sub è aggiornato dal webhook."""
+        return render_template("checkout_success.html")
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # WEBHOOK STRIPE (esentato da CSRF — Stripe non manda token CSRF)
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/webhook/stripe", methods=["POST"])
@@ -2547,6 +2773,25 @@ def create_app():
         et = event.get("type", "")
         obj = event.get("data", {}).get("object", {})
 
+        # ─── 1. Eventi sottoscrizione SaaS GestFatture ──────────────────────
+        is_sub_event = (
+            et in ("customer.subscription.created",
+                   "customer.subscription.updated",
+                   "customer.subscription.deleted",
+                   "invoice.paid",
+                   "invoice.payment_failed")
+            or (et == "checkout.session.completed"
+                and obj.get("mode") == "subscription")
+        )
+
+        if is_sub_event:
+            try:
+                _handle_subscription_event(et, obj)
+            except Exception as e:
+                logging.exception("Errore gestione webhook subscription: %s", e)
+            return jsonify({"status": "ok"})
+
+        # ─── 2. Eventi pagamento fattura cliente (logica esistente) ─────────
         invoice_id = None
         if et in ("checkout.session.completed", "payment_intent.succeeded"):
             meta = obj.get("metadata", {})
@@ -2671,7 +2916,9 @@ def create_app():
                       "backup_s3_access_key_id", "backup_s3_secret_access_key",
                       "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix",
                       "gocardless_secret_id", "gocardless_secret_key",
-                      "tink_client_id", "tink_client_secret"]
+                      "tink_client_id", "tink_client_secret",
+                      "stripe_secret_key", "stripe_publishable_key", "stripe_price_id",
+                      "signup_enabled"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -2686,7 +2933,8 @@ def create_app():
                     if k in ("smtp_password", "resend_api_key",
                              "backup_s3_secret_access_key",
                              "gocardless_secret_key",
-                             "tink_client_secret") and not val:
+                             "tink_client_secret",
+                             "stripe_secret_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
                     if old_val != val:
@@ -3386,6 +3634,31 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT DEFAULT ''"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna users.totp_backup_codes")
+            if "plan" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan TEXT DEFAULT 'free'"))
+                conn.execute(text("UPDATE users SET plan = 'free' WHERE plan IS NULL"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.plan")
+            if "stripe_customer_id" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN stripe_customer_id TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.stripe_customer_id")
+            if "stripe_subscription_id" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN stripe_subscription_id TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.stripe_subscription_id")
+            if "subscription_status" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN subscription_status TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.subscription_status")
+            if "trial_ends_at" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN trial_ends_at DATETIME"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.trial_ends_at")
+            if "current_period_end" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN current_period_end DATETIME"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.current_period_end")
 
         # ── Tabella bank_accounts (per refactoring GoCardless → Tink) ────────
         if "bank_accounts" in inspector.get_table_names():
@@ -3438,6 +3711,11 @@ def _seed_settings():
         "smtp_use_tls": "true" if config.SMTP_USE_TLS else "false",
         "payment_base_url": config.PAYMENT_BASE_URL,
         "stripe_webhook_secret": "", "paypal_webhook_id": "",
+        # ─── Sottoscrizione SaaS (signup pubblico → Stripe Checkout) ─────
+        "stripe_secret_key":      "",   # sk_live_... per gestire subscription
+        "stripe_publishable_key": "",   # pk_live_... (mostrabile lato client)
+        "stripe_price_id":        "",   # price_... del piano €15/mese
+        "signup_enabled":         "true",  # toggle per disabilitare signup pubblici
     }
     for k, v in defaults.items():
         if not AppSettings.get(k):
@@ -3459,6 +3737,195 @@ def _ensure_admin():
             first.is_admin = True
             db.session.commit()
             logging.warning("Nessun admin trovato — promosso utente '%s'.", first.username)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Helper SOTTOSCRIZIONE SaaS (Stripe webhook + email benvenuto)
+# ═══════════════════════════════════════════════════════════════════════════
+def _handle_subscription_event(event_type: str, obj: dict):
+    """Aggiorna lo stato sottoscrizione di un User in base agli eventi Stripe.
+
+    Eventi gestiti:
+    - checkout.session.completed (mode=subscription) → primo abbonamento
+    - customer.subscription.created/updated         → cambio stato
+    - customer.subscription.deleted                 → sottoscrizione eliminata
+    - invoice.paid                                  → rinnovo pagato
+    - invoice.payment_failed                        → pagamento fallito
+    """
+    et = event_type
+
+    def _user_from(sub_id: str = "", cust_id: str = "", uid: str = ""):
+        u = None
+        if uid:
+            try:
+                u = User.query.get(int(uid))
+            except Exception:
+                u = None
+        if not u and sub_id:
+            u = User.query.filter_by(stripe_subscription_id=sub_id).first()
+        if not u and cust_id:
+            u = User.query.filter_by(stripe_customer_id=cust_id).first()
+        return u
+
+    def _ts_to_dt(ts):
+        if not ts:
+            return None
+        try:
+            return datetime.utcfromtimestamp(int(ts))
+        except Exception:
+            return None
+
+    if et == "checkout.session.completed" and obj.get("mode") == "subscription":
+        meta = obj.get("metadata", {}) or {}
+        uid = meta.get("user_id", "")
+        sub_id = obj.get("subscription") or ""
+        cust_id = obj.get("customer") or ""
+        user = _user_from(sub_id=sub_id, cust_id=cust_id, uid=uid)
+        if user:
+            if cust_id and not user.stripe_customer_id:
+                user.stripe_customer_id = cust_id
+            if sub_id:
+                user.stripe_subscription_id = sub_id
+            user.plan = "pro"
+            db.session.commit()
+            audit("subscription_started", target=f"user:{user.username}",
+                  details=f"sub:{sub_id[:20]}", user=user)
+            logging.info("Stripe sub: signup user=%s sub=%s", user.username, sub_id)
+        return
+
+    if et in ("customer.subscription.created", "customer.subscription.updated"):
+        sub_id = obj.get("id", "")
+        cust_id = obj.get("customer", "")
+        status = obj.get("status", "")
+        user = _user_from(sub_id=sub_id, cust_id=cust_id)
+        if user:
+            user.stripe_subscription_id = sub_id
+            if cust_id:
+                user.stripe_customer_id = cust_id
+            user.subscription_status = status
+            user.current_period_end = _ts_to_dt(obj.get("current_period_end")) \
+                                      or user.current_period_end
+            user.trial_ends_at = _ts_to_dt(obj.get("trial_end")) \
+                                 or user.trial_ends_at
+            if status in ("trialing", "active"):
+                user.plan = "pro"
+            elif status in ("canceled", "incomplete_expired", "unpaid"):
+                user.plan = "expired"
+            db.session.commit()
+            audit("subscription_updated", target=f"user:{user.username}",
+                  details=f"status:{status}", user=user)
+        return
+
+    if et == "customer.subscription.deleted":
+        sub_id = obj.get("id", "")
+        user = _user_from(sub_id=sub_id, cust_id=obj.get("customer", ""))
+        if user:
+            user.subscription_status = "canceled"
+            user.plan = "expired"
+            db.session.commit()
+            audit("subscription_canceled", target=f"user:{user.username}", user=user)
+        return
+
+    if et == "invoice.paid":
+        sub_id = obj.get("subscription", "")
+        if sub_id:
+            user = _user_from(sub_id=sub_id, cust_id=obj.get("customer", ""))
+            if user:
+                amt = (obj.get("amount_paid") or 0) / 100.0
+                audit("subscription_paid", target=f"user:{user.username}",
+                      details=f"amount:{amt:.2f}EUR", user=user)
+        return
+
+    if et == "invoice.payment_failed":
+        sub_id = obj.get("subscription", "")
+        if sub_id:
+            user = _user_from(sub_id=sub_id, cust_id=obj.get("customer", ""))
+            if user:
+                audit("subscription_payment_failed",
+                      target=f"user:{user.username}", user=user)
+        return
+
+
+def _send_welcome_email(user, company_name: str):
+    """Invia email di benvenuto via Resend o SMTP (provider già configurato)."""
+    if not user.email:
+        return
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.utils import formatdate, make_msgid, formataddr
+    from email_service import deliver_email
+
+    base_url = (AppSettings.get("app_external_url", "").rstrip("/")
+                or "https://app.gestfatture.com")
+    sender_name  = AppSettings.get("company_name", "GestFatture")
+    sender_email = (AppSettings.get("resend_from_email", "")
+                    or AppSettings.get("smtp_user", "")
+                    or "noreply@gestfatture.com")
+
+    name = company_name or user.username
+    subject = f"Benvenuto in GestFatture, {name}!"
+
+    html = f"""<!DOCTYPE html>
+<html lang="it"><body style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;background:#f8fafc;padding:24px">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
+    <div style="background:#1e3a5f;color:#fff;padding:24px 28px">
+      <h2 style="margin:0;font-size:22px">Benvenuto in GestFatture 🎉</h2>
+    </div>
+    <div style="padding:28px">
+      <p>Ciao <strong>{name}</strong>,</p>
+      <p>il tuo account è attivo. Hai <strong>30 giorni di prova gratuita</strong>:
+         non ti addebitiamo nulla durante questo periodo, e puoi disdire quando vuoi
+         dalle Impostazioni.</p>
+      <p style="margin-top:24px"><strong>Per iniziare:</strong></p>
+      <ol>
+        <li>Vai su <a href="{base_url}/settings">Impostazioni</a> per configurare
+            email (SMTP/Resend), il tuo profilo e le integrazioni</li>
+        <li>Importa le prime fatture (PDF, XML FatturaPA, CSV o ZIP)</li>
+        <li>Lascia che GestFatture si occupi del resto</li>
+      </ol>
+      <p style="text-align:center;margin:32px 0">
+        <a href="{base_url}/" style="background:#1e3a5f;color:#fff;padding:14px 32px;
+           border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
+          Apri la dashboard →
+        </a>
+      </p>
+      <p style="margin-top:32px;font-size:13px;color:#64748b">
+        Hai domande? Rispondi a questa email oppure apri un ticket dall'app.
+      </p>
+      <p style="font-size:13px;color:#64748b">— Il team di GestFatture</p>
+    </div>
+  </div>
+</body></html>"""
+
+    plain = (
+        f"Ciao {name},\n\n"
+        f"il tuo account GestFatture è attivo. Hai 30 giorni di prova gratuita.\n\n"
+        f"Per iniziare:\n"
+        f"1. Vai su {base_url}/settings per configurare email, profilo e integrazioni\n"
+        f"2. Importa le prime fatture (PDF, XML, CSV)\n"
+        f"3. Lascia che GestFatture si occupi del resto\n\n"
+        f"Apri la dashboard: {base_url}/\n\n"
+        f"Hai domande? Rispondi a questa email.\n\n"
+        f"— Il team di GestFatture\n"
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg.attach(MIMEText(plain, "plain", "utf-8"))
+    msg.attach(MIMEText(html,  "html",  "utf-8"))
+    msg["Subject"]    = subject
+    msg["From"]       = formataddr((sender_name, sender_email))
+    msg["To"]         = user.email
+    msg["Reply-To"]   = sender_email
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1] if "@" in sender_email else "gestfatture.com")
+
+    ok, info = deliver_email(
+        msg=msg, subject=subject, recipient=user.email,
+        html=html, plain=plain,
+        sender_name=sender_name, sender_email=sender_email,
+    )
+    if not ok:
+        logging.warning("Welcome email failed for %s: %s", user.username, info)
 
 
 # ─── Avvio ────────────────────────────────────────────────────────────────────

@@ -66,13 +66,20 @@
           <hr class="flex-grow-1">
         </div>
 
+        <!-- ─── Pulsante registrazione ─── -->
+        <a href="{{ url_for('register') }}" class="btn btn-success w-100 mb-2">
+          <i class="bi bi-person-plus me-1"></i> Crea un nuovo account
+        </a>
+        <p class="text-muted text-center small mt-1 mb-3">
+          30 giorni gratis · Disdici quando vuoi
+        </p>
+
         <!-- ─── Pulsante ospite ─── -->
         <a href="{{ url_for('login_as_guest') }}" class="btn btn-outline-secondary w-100">
           <i class="bi bi-person-circle me-1"></i> Prova come Ospite
         </a>
         <p class="text-muted text-center small mt-2 mb-0">
-          Crea un account temporaneo per testare l'app.<br>
-          I tuoi dati restano privati e separati.
+          Account temporaneo, dati cancellati al logout.
         </p>
       </div>
     </div>

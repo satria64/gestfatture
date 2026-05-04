@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Registrati – GestFatture</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <style>
+    body { background:#f1f5f9; padding:40px 16px; }
+    .register-card { width:100%; max-width:520px; margin:0 auto; }
+    .brand { background:#1e3a5f; color:#fff; border-radius:10px 10px 0 0; padding:28px; text-align:center; }
+    .trial-badge {
+      background:#fef3c7; color:#92400e; padding:8px 14px; border-radius:6px;
+      font-size:.9rem; text-align:center; margin-bottom:18px;
+    }
+    .pwd-rules { font-size:.8rem; color:#64748b; margin-top:4px; }
+  </style>
+</head>
+<body>
+  <div class="register-card shadow-lg rounded">
+    <div class="brand">
+      <i class="bi bi-receipt-cutoff fs-1"></i>
+      <h3 class="mt-2 mb-0">Crea il tuo account</h3>
+      <p class="mb-0 opacity-75 small">30 giorni di prova gratuita</p>
+    </div>
+    <div class="card border-0 rounded-0 rounded-bottom">
+      <div class="card-body p-4">
+
+        <div class="trial-badge">
+          <i class="bi bi-info-circle me-1"></i>
+          Inserisci la carta per iniziare. <strong>Non addebitiamo nulla per 30 giorni.</strong>
+          Disdici quando vuoi.
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for cat, msg in messages %}
+            <div class="alert alert-{{ cat }} py-2">{{ msg }}</div>
+          {% endfor %}
+        {% endwith %}
+
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Username</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-person"></i></span>
+              <input type="text" name="username" class="form-control" required
+                     value="{{ username|default('', true) }}"
+                     placeholder="es. mario.rossi" autofocus
+                     pattern="[A-Za-z0-9_\-\.]{3,}" minlength="3" maxlength="40">
+            </div>
+            <div class="form-text">Solo lettere, numeri e _ - .  (minimo 3 caratteri)</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-envelope"></i></span>
+              <input type="email" name="email" class="form-control" required
+                     value="{{ email|default('', true) }}"
+                     placeholder="tu@azienda.it">
+            </div>
+            <div class="form-text">Riceverai qui le notifiche e l'email di benvenuto.</div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Password</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-lock"></i></span>
+              <input type="password" name="password" class="form-control" required
+                     placeholder="••••••••" minlength="8">
+            </div>
+            <div class="pwd-rules">
+              Minimo 8 caratteri, almeno una lettera e un numero.
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Ragione sociale / Nome azienda</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-building"></i></span>
+              <input type="text" name="company_name" class="form-control" required
+                     value="{{ company_name|default('', true) }}"
+                     placeholder="es. Rossi & C. S.r.l." maxlength="200">
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Partita IVA</label>
+            <div class="input-group">
+              <span class="input-group-text"><i class="bi bi-hash"></i></span>
+              <input type="text" name="vat_number" class="form-control" required
+                     value="{{ vat_number|default('', true) }}"
+                     placeholder="11 cifre" inputmode="numeric"
+                     pattern="[0-9]{11}" minlength="11" maxlength="11">
+            </div>
+            <div class="form-text">Serve per riconoscere correttamente le tue fatture passive.</div>
+          </div>
+
+          <div class="mb-4 form-check">
+            <input class="form-check-input" type="checkbox" name="terms" id="terms" required>
+            <label class="form-check-label" for="terms">
+              Accetto i
+              <a href="{{ url_for('terms') }}" target="_blank">Termini di servizio</a>
+              e la
+              <a href="{{ url_for('privacy') }}" target="_blank">Privacy Policy</a>.
+            </label>
+          </div>
+
+          <button type="submit" class="btn btn-primary btn-lg w-100">
+            <i class="bi bi-credit-card me-1"></i> Continua su Stripe
+          </button>
+
+          <p class="text-muted text-center small mt-3 mb-0">
+            Al prossimo passaggio inserirai la carta. Puoi disdire in qualunque momento.
+          </p>
+        </form>
+
+        <hr class="my-4">
+
+        <p class="text-center small text-muted mb-0">
+          Hai già un account? <a href="{{ url_for('login') }}">Accedi</a>
+        </p>
+      </div>
+    </div>
+    <p class="text-center small text-muted mt-3 mb-0">
+      <a href="{{ url_for('privacy') }}" class="text-muted">Privacy</a>
+      ·
+      <a href="{{ url_for('terms') }}" class="text-muted">Termini di servizio</a>
+    </p>
+  </div>
+  {% include '_cookie_banner.html' %}
+</body>
+</html>

@@ -148,6 +148,14 @@
           <i class="bi bi-gear me-2"></i> Impostazioni
         </a>
       </li>
+      {% if current_user.is_authenticated and not current_user.is_admin %}
+      <li>
+        <a href="{{ url_for('billing') }}"
+           class="nav-link text-white {% if 'billing' in (request.endpoint or '') or request.endpoint == 'checkout_success' %}active{% endif %}">
+          <i class="bi bi-credit-card-2-front me-2"></i> Sottoscrizione
+        </a>
+      </li>
+      {% endif %}
       {% if current_user.is_authenticated and current_user.is_admin %}
       <li>
         <a href="{{ url_for('integrations') }}"

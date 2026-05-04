@@ -81,6 +81,23 @@
 - [x] Session timeout 4h inattività
 - [x] Audit log con UI admin (/admin/audit-log)
 
+### Sottoscrizione SaaS — signup pubblico + abbonamenti Stripe
+- [x] **Registrazione self-service** `/register` (form: username, email, password, ragione sociale, P.IVA, accept terms)
+- [x] Validation server-side + rate limit 5/min + CSRF
+- [x] **Email di benvenuto** automatica via Resend/SMTP al nuovo utente
+- [x] **Stripe Checkout** in modalità subscription con `trial_period_days=30` e carta richiesta upfront
+- [x] **Customer Portal** Stripe per gestire metodo di pagamento e disdire (`/billing/portal`)
+- [x] **Pagina /billing** con stato sottoscrizione, giorni di prova rimasti, prossimo rinnovo, FAQ
+- [x] **Webhook Stripe esteso**: gestisce `checkout.session.completed (mode=subscription)`,
+      `customer.subscription.created/updated/deleted`, `invoice.paid`, `invoice.payment_failed`
+- [x] **Middleware enforcer**: utenti con trial scaduto / sub disdetta vengono reindirizzati a `/billing`
+- [x] **Colonne User**: `plan`, `stripe_customer_id`, `stripe_subscription_id`,
+      `subscription_status`, `trial_ends_at`, `current_period_end` (migration automatica)
+- [x] **Settings admin**: sezione Stripe SaaS per inserire `stripe_secret_key`, `stripe_publishable_key`,
+      `stripe_price_id`, toggle `signup_enabled`
+- [x] **Voce sidebar "Sottoscrizione"** per utenti non-admin
+- [x] **Link "Registrati"** in pagina login
+
 ### GDPR & Compliance (Step 3 completato)
 - [x] **Export dati GDPR Art. 20** — `/account/export` scarica ZIP con tutti i dati (JSON + PDF allegati). Credenziali di terzi redatte.
 - [x] **Cancellazione account GDPR Art. 17** — `/account/delete` (POST con password + conferma "ELIMINA"). Cancella DB + file su disco. Audit preservato.
@@ -282,4 +299,30 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR + Resend + portal + admin metriche + bandi MVP + help + survey ticket + export ticket + crypto at-rest + backup S3)*
+*Ultimo aggiornamento: 2026-05-05 (signup pubblico self-service + Stripe Subscriptions + Customer Portal + middleware enforcer trial)*
+
+---
+
+## 🚦 Setup Stripe (post-deploy)
+
+Per abilitare il signup pubblico con abbonamenti €15/mese:
+
+1. **Crea il prodotto su Stripe**
+   Dashboard → Products → "GestFatture Pro", prezzo ricorrente €15/mese, copia il `price_id`
+
+2. **Configura il Customer Portal**
+   Dashboard → Settings → Billing → Customer portal → abilita
+   "Cancellazione subscription" e "Aggiornamento metodi di pagamento"
+
+3. **Crea il webhook**
+   Dashboard → Developers → Webhooks → endpoint:
+   `https://app.gestfatture.com/webhook/stripe`
+   Eventi: `checkout.session.completed`, `payment_intent.succeeded`,
+   `customer.subscription.created`, `customer.subscription.updated`,
+   `customer.subscription.deleted`, `invoice.paid`, `invoice.payment_failed`
+
+4. **In app → Impostazioni admin**: incolla
+   - `stripe_secret_key` (sk_live_...)
+   - `stripe_publishable_key` (pk_live_...)
+   - `stripe_price_id` (price_...)
+   - `stripe_webhook_secret` (whsec_...)

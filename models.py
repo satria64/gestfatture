@@ -33,12 +33,79 @@ class User(db.Model, UserMixin):
     totp_secret        = db.Column(db.String(64),  default="")  # base32, vuoto se non configurato
     totp_enabled       = db.Column(db.Boolean,    default=False, nullable=False)
     totp_backup_codes  = db.Column(db.Text,       default="")   # JSON list di hash SHA-256 single-use
+    # ─── Sottoscrizione SaaS (Stripe) ────────────────────────────────────────
+    plan                   = db.Column(db.String(40), default="free", nullable=False)
+    # free: utente legacy / admin / ospite
+    # trial: in periodo di prova (carta inserita, addebito futuro)
+    # pro: sottoscrizione attiva e pagata
+    # expired: sub disdetta o non più pagante
+    stripe_customer_id     = db.Column(db.String(80), default="", index=True)
+    stripe_subscription_id = db.Column(db.String(80), default="", index=True)
+    subscription_status    = db.Column(db.String(40), default="")
+    # trialing | active | past_due | canceled | unpaid | incomplete | incomplete_expired
+    trial_ends_at          = db.Column(db.DateTime, nullable=True)
+    current_period_end     = db.Column(db.DateTime, nullable=True)
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password: str) -> bool:
         return check_password_hash(self.password_hash, password)
+
+    @property
+    def is_guest(self) -> bool:
+        return (self.username or "").startswith("ospite_")
+
+    @property
+    def is_in_trial(self) -> bool:
+        if self.subscription_status == "trialing":
+            return True
+        return bool(self.trial_ends_at and self.trial_ends_at > datetime.utcnow())
+
+    @property
+    def days_left_in_trial(self):
+        if not self.trial_ends_at:
+            return None
+        delta = self.trial_ends_at - datetime.utcnow()
+        return max(0, delta.days)
+
+    @property
+    def has_active_subscription(self) -> bool:
+        """L'utente ha accesso operativo all'app:
+        admin/ospite passano sempre; gli altri devono avere trial valido o sub attiva."""
+        if self.is_admin or self.is_guest:
+            return True
+        if self.subscription_status in ("trialing", "active"):
+            return True
+        if self.trial_ends_at and self.trial_ends_at > datetime.utcnow():
+            return True
+        return False
+
+    @property
+    def subscription_label(self):
+        """Etichetta UI dello stato sottoscrizione."""
+        if self.is_admin:
+            return ("Amministratore", "primary")
+        if self.is_guest:
+            return ("Ospite", "secondary")
+        s = self.subscription_status
+        if s == "trialing":
+            d = self.days_left_in_trial or 0
+            return (f"Prova ({d} giorni)", "info")
+        if s == "active":
+            return ("Attiva", "success")
+        if s == "past_due":
+            return ("Pagamento in ritardo", "warning")
+        if s in ("canceled", "incomplete_expired"):
+            return ("Disdetta", "danger")
+        if s == "unpaid":
+            return ("Non pagata", "danger")
+        if s == "incomplete":
+            return ("Incompleta", "warning")
+        if self.trial_ends_at and self.trial_ends_at > datetime.utcnow():
+            d = max(0, (self.trial_ends_at - datetime.utcnow()).days)
+            return (f"Prova ({d} giorni)", "info")
+        return ("Non attiva", "secondary")
 
     @staticmethod
     def validate_password(pw: str) -> tuple[bool, str]:
@@ -228,6 +295,7 @@ SENSITIVE_USER_KEYS = {
 }
 SENSITIVE_APP_KEYS = {
     "smtp_password", "anthropic_api_key", "stripe_webhook_secret",
+    "stripe_secret_key",
     "paypal_webhook_id", "resend_api_key",
     "backup_s3_secret_access_key",
     "gocardless_secret_id", "gocardless_secret_key",  # legacy, dormiente
@@ -332,6 +400,15 @@ class AuditLog(db.Model):
             "bank_recon_notify":  ("Banca: notifica digest","primary"),
             "fiscal_seed_it":     ("Scadenze fiscali IT caricate", "info"),
             "fiscal_notify":      ("Scadenze fiscali notificate",  "primary"),
+            "signup_public":      ("Registrazione pubblica",        "primary"),
+            "signup_failed":      ("Registrazione fallita",         "warning"),
+            "checkout_started":   ("Stripe Checkout avviato",       "info"),
+            "subscription_started":   ("Sottoscrizione avviata",      "success"),
+            "subscription_updated":   ("Sottoscrizione aggiornata",   "info"),
+            "subscription_canceled":  ("Sottoscrizione disdetta",     "warning"),
+            "subscription_paid":      ("Pagamento sub. ricevuto",     "success"),
+            "subscription_payment_failed": ("Pagamento sub. fallito", "danger"),
+            "billing_portal_open":    ("Customer portal aperto",      "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 
