@@ -216,6 +216,50 @@ def start_scheduler(app):
         coalesce=True,
     )
 
+    # Riconciliazione bancaria giornaliera alle 07:00
+    def _bank_runner():
+        try:
+            with app.app_context():
+                from models import db, User, BankAccount, BankTransaction, Invoice
+                from bank_service import sync_all_accounts_for_user, auto_reconcile_user
+                from notification_service import notify_owner_of_bank_reconciliation
+                from datetime import datetime as _dt, timedelta as _td
+
+                users = (User.query
+                         .filter(~User.username.like("ospite_%"))
+                         .join(BankAccount, BankAccount.user_id == User.id)
+                         .distinct().all())
+                for u in users:
+                    try:
+                        sync_stats = sync_all_accounts_for_user(db, u.id, days_back=14)
+                        # Snapshot tx prima della reconciliation per il digest
+                        cutoff = _dt.utcnow() - _td(hours=24)
+                        recon_stats = auto_reconcile_user(db, u.id)
+                        # Costruisci la lista (tx, invoice) per il digest
+                        recently_matched = (BankTransaction.query
+                                            .filter_by(user_id=u.id, status="auto_matched")
+                                            .filter(BankTransaction.matched_at >= cutoff)
+                                            .all())
+                        auto_pairs = [(tx, tx.matched_invoice) for tx in recently_matched if tx.matched_invoice]
+                        pending = (BankTransaction.query
+                                   .filter_by(user_id=u.id, status="pending")
+                                   .filter(BankTransaction.amount > 0).count())
+                        notify_owner_of_bank_reconciliation(u, db, auto_pairs, pending)
+                        log.info("Bank u=%s: sync=%s recon=%s pending=%d",
+                                 u.username, sync_stats, recon_stats, pending)
+                    except Exception as e:
+                        log.error("Bank job u=%s fallito: %s", u.username, e)
+        except Exception as e:
+            log.error("Bank job globale fallito: %s", e, exc_info=True)
+    _scheduler.add_job(
+        func=_bank_runner,
+        trigger=CronTrigger(hour=7, minute=0),
+        id="bank_reconciliation",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     # Bandi sync giornaliero alle 06:00 (prima del job solleciti)
     _scheduler.add_job(
         func=run_bandi_sync,
@@ -245,7 +289,7 @@ def start_scheduler(app):
     )
 
     _scheduler.start()
-    log.info("Scheduler avviato – solleciti 08:00, bandi 06:00, backup mon 03:00, integrazioni")
+    log.info("Scheduler avviato – solleciti 08:00, bank 07:00, bandi 06:00, backup mon 03:00, integrazioni")
     return _scheduler
 
 

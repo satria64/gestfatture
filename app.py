@@ -14,7 +14,7 @@ from flask_limiter.util import get_remote_address
 
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
                     User, PecMessage, SupportTicket, TicketMessage, AuditLog,
-                    Bando, BandoMatch)
+                    Bando, BandoMatch, BankAccount, BankTransaction)
 from auth import login_manager
 from config import config
 
@@ -549,6 +549,196 @@ def create_app():
         return send_from_directory(
             app.static_folder, "favicon.png", mimetype="image/png"
         )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # RICONCILIAZIONE BANCARIA (GoCardless Bank Account Data, PSD2)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/my-integrations/bank")
+    @login_required
+    def bank_overview():
+        """Lista conti collegati dell'utente + bottone per collegarne uno nuovo."""
+        accounts = (BankAccount.query.filter_by(user_id=current_user.id)
+                    .order_by(BankAccount.created_at.desc()).all())
+        # Conta transazioni pending per UI
+        pending_count = BankTransaction.query.filter_by(
+            user_id=current_user.id, status="pending"
+        ).filter(BankTransaction.amount > 0).count()
+        return render_template("bank_overview.html",
+                               accounts=accounts, pending_count=pending_count)
+
+    @app.route("/my-integrations/bank/connect", methods=["GET", "POST"])
+    @login_required
+    @limiter.limit("10 per hour")
+    def bank_connect():
+        """Mostra lista banche italiane (GET) o avvia OAuth flow (POST)."""
+        from bank_service import list_italian_banks, create_connection
+        if request.method == "POST":
+            institution_id = request.form.get("institution_id", "").strip()
+            if not institution_id:
+                flash("Scegli una banca dalla lista.", "warning")
+                return redirect(url_for("bank_connect"))
+            try:
+                base_url = AppSettings.get("app_external_url", "").rstrip("/") \
+                           or request.host_url.rstrip("/")
+                redirect_url = f"{base_url}/my-integrations/bank/callback"
+                conn = create_connection(current_user.id, institution_id, redirect_url)
+                # Salva requisition_id in sessione per il callback
+                session["bank_pending_requisition"] = conn["id"]
+                session["bank_pending_institution"] = institution_id
+                audit("bank_connect_start", target=f"institution:{institution_id}")
+                return redirect(conn["link"])
+            except Exception as e:
+                logging.exception("Errore avvio bank connect")
+                flash(f"❌ Errore: {e}", "danger")
+                return redirect(url_for("bank_connect"))
+        # GET: mostra lista banche
+        try:
+            banks = list_italian_banks()
+        except Exception as e:
+            flash(f"⚠️ Impossibile caricare lista banche: {e}", "danger")
+            banks = []
+        return render_template("bank_connect.html", banks=banks)
+
+    @app.route("/my-integrations/bank/callback")
+    @login_required
+    def bank_callback():
+        """Callback dopo OAuth GoCardless. La requisition_id è in sessione."""
+        from bank_service import fetch_requisition_accounts, fetch_account_details
+        req_id = session.pop("bank_pending_requisition", None)
+        institution_id = session.pop("bank_pending_institution", "")
+        if not req_id:
+            flash("Sessione scaduta. Riprova a collegare la banca.", "warning")
+            return redirect(url_for("bank_overview"))
+        try:
+            req = fetch_requisition_accounts(req_id)
+            account_ids = req.get("accounts", []) or []
+            inst_name = req.get("institution_id", institution_id)
+            saved = 0
+            for acc_id in account_ids:
+                # Skip se già collegato
+                if BankAccount.query.filter_by(
+                    user_id=current_user.id, external_account_id=acc_id
+                ).first():
+                    continue
+                try:
+                    details = fetch_account_details(acc_id).get("account", {})
+                except Exception:
+                    details = {}
+                expires_at = datetime.utcnow() + timedelta(days=90)
+                ba = BankAccount(
+                    user_id=current_user.id,
+                    requisition_id=req_id,
+                    external_account_id=acc_id,
+                    iban=(details.get("iban") or "")[:40],
+                    institution_id=inst_name[:80],
+                    institution_name=inst_name[:120],
+                    owner_name=(details.get("ownerName") or "")[:200],
+                    name=(details.get("name") or details.get("displayName") or "")[:200],
+                    currency=details.get("currency", "EUR"),
+                    status="linked",
+                    expires_at=expires_at,
+                )
+                db.session.add(ba)
+                saved += 1
+            db.session.commit()
+            audit("bank_connect_ok", target=f"institution:{institution_id}",
+                  details=f"{saved} conti collegati")
+            flash(f"✅ {saved} conto/i collegato/i. Click 'Sincronizza' per scaricare le transazioni.",
+                  "success")
+        except Exception as e:
+            logging.exception("Errore bank callback")
+            audit("bank_connect_failed", details=str(e)[:200])
+            flash(f"❌ Errore: {e}", "danger")
+        return redirect(url_for("bank_overview"))
+
+    @app.route("/my-integrations/bank/<int:bid>/sync-now", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per hour")
+    def bank_sync_now(bid):
+        from bank_service import sync_account, auto_reconcile_user
+        ba = BankAccount.query.filter_by(id=bid, user_id=current_user.id).first_or_404()
+        try:
+            stats = sync_account(db, ba, days_back=60)
+            recon = auto_reconcile_user(db, current_user.id)
+            audit("bank_sync", target=f"account:{ba.id}",
+                  details=f"new={stats['new']} auto={recon['auto_matched']}")
+            flash(f"✅ Sync OK: {stats['new']} nuove transazioni · "
+                  f"{recon['auto_matched']} riconciliate automaticamente · "
+                  f"{recon['left_pending']} in coda manuale.", "success")
+        except Exception as e:
+            logging.exception("Errore sync bank manuale")
+            flash(f"❌ Errore sync: {e}", "danger")
+        return redirect(url_for("bank_overview"))
+
+    @app.route("/my-integrations/bank/<int:bid>/disconnect", methods=["POST"])
+    @login_required
+    def bank_disconnect(bid):
+        from bank_service import disconnect_account
+        ba = BankAccount.query.filter_by(id=bid, user_id=current_user.id).first_or_404()
+        disconnect_account(db, ba)
+        audit("bank_disconnect", target=f"account:{ba.id}")
+        flash("Conto bancario scollegato. Le transazioni storiche restano per la riconciliazione.", "info")
+        return redirect(url_for("bank_overview"))
+
+    @app.route("/bank/reconciliation")
+    @login_required
+    def bank_reconciliation():
+        """Coda di transazioni pending da matchare manualmente con fatture."""
+        from bank_service import find_matches_for_transaction
+        # Solo entrate pending
+        pending = (BankTransaction.query
+                   .filter_by(user_id=current_user.id, status="pending")
+                   .filter(BankTransaction.amount > 0)
+                   .order_by(BankTransaction.booking_date.desc()).all())
+        # Carica fatture aperte una volta sola
+        open_invoices = Invoice.query.filter(
+            Invoice.user_id == current_user.id,
+            Invoice.status.in_(["pending", "overdue"]),
+            db.or_(Invoice.document_type != "TD04", Invoice.document_type.is_(None)),
+        ).all()
+        # Per ogni tx, calcola top 5 candidati
+        rows = []
+        for tx in pending:
+            candidates = find_matches_for_transaction(tx, open_invoices)[:5]
+            rows.append((tx, candidates))
+        return render_template("bank_reconciliation.html",
+                               rows=rows, open_invoices=open_invoices)
+
+    @app.route("/bank/reconciliation/<int:tx_id>/match/<int:inv_id>", methods=["POST"])
+    @login_required
+    def bank_match_manual(tx_id, inv_id):
+        tx = BankTransaction.query.filter_by(id=tx_id, user_id=current_user.id).first_or_404()
+        inv = Invoice.query.filter_by(id=inv_id, user_id=current_user.id).first_or_404()
+        if tx.amount <= 0:
+            flash("Non si può matchare un'uscita.", "warning")
+            return redirect(url_for("bank_reconciliation"))
+        tx.matched_invoice_id = inv.id
+        tx.status = "manual_matched"
+        tx.match_confidence = 100
+        tx.match_reason = "Match confermato manualmente"
+        tx.matched_at = datetime.utcnow()
+        tx.matched_by_user_id = current_user.id
+        inv.status = "paid"
+        inv.payment_date = tx.booking_date or date.today()
+        inv.payment_ref = f"bank:{tx.external_id[:60]}"
+        db.session.commit()
+        audit("bank_match_manual", target=f"tx:{tx.id}",
+              details=f"invoice:{inv.id} num:{inv.number}")
+        flash(f"✅ Transazione del {tx.booking_date} matchata con fattura {inv.number}. Marcata come pagata.",
+              "success")
+        return redirect(url_for("bank_reconciliation"))
+
+    @app.route("/bank/reconciliation/<int:tx_id>/ignore", methods=["POST"])
+    @login_required
+    def bank_ignore_tx(tx_id):
+        tx = BankTransaction.query.filter_by(id=tx_id, user_id=current_user.id).first_or_404()
+        tx.status = "ignored"
+        tx.matched_at = datetime.utcnow()
+        tx.matched_by_user_id = current_user.id
+        db.session.commit()
+        audit("bank_ignore", target=f"tx:{tx.id}")
+        flash("Transazione marcata come ignorata.", "info")
+        return redirect(url_for("bank_reconciliation"))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # KNOWLEDGE BASE / HELP
@@ -1811,7 +2001,8 @@ def create_app():
                       "email_provider", "resend_api_key", "resend_from_email",
                       "backup_s3_enabled", "backup_s3_endpoint_url", "backup_s3_bucket",
                       "backup_s3_access_key_id", "backup_s3_secret_access_key",
-                      "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix"]
+                      "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix",
+                      "gocardless_secret_id", "gocardless_secret_key"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -1824,7 +2015,8 @@ def create_app():
                     val = request.form.get(k, "")
                     val = val.strip().strip("\r\n\t ")
                     if k in ("smtp_password", "resend_api_key",
-                             "backup_s3_secret_access_key") and not val:
+                             "backup_s3_secret_access_key",
+                             "gocardless_secret_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
                     if old_val != val:

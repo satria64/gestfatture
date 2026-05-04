@@ -240,6 +240,38 @@
     </div>
   </div>
 
+  <!-- GoCardless Bank Account Data (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-bank me-1"></i> GoCardless Bank Account Data
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info py-2 small mb-3">
+        Provider PSD2 per riconciliazione automatica con i conti bancari italiani.
+        <strong>Gratis</strong> fino a 50.000 transazioni/mese.
+        <ol class="mb-0 mt-2">
+          <li>Registrati su <a href="https://bankaccountdata.gocardless.com/" target="_blank">bankaccountdata.gocardless.com</a></li>
+          <li>Vai su <strong>User secrets</strong> → "Create new"</li>
+          <li>Copia <code>secret_id</code> e <code>secret_key</code> qui sotto</li>
+        </ol>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Secret ID</label>
+          <input type="text" name="gocardless_secret_id" class="form-control font-monospace"
+                 value="{{ settings.gocardless_secret_id }}" placeholder="UUID v4">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Secret Key</label>
+          <input type="password" name="gocardless_secret_key" class="form-control"
+                 value="{{ settings.gocardless_secret_key }}">
+          <div class="form-text">Lascia vuoto per non modificare. Verrà cifrato at-rest.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Backup S3 settimanale (solo admin) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">

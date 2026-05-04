@@ -224,6 +224,7 @@ SENSITIVE_APP_KEYS = {
     "smtp_password", "anthropic_api_key", "stripe_webhook_secret",
     "paypal_webhook_id", "resend_api_key",
     "backup_s3_secret_access_key",
+    "gocardless_secret_id", "gocardless_secret_key",
 }
 
 
@@ -314,6 +315,14 @@ class AuditLog(db.Model):
             "survey_sent":       ("Survey inviato",       "info"),
             "secrets_migrated":  ("Secret cifrati",       "primary"),
             "backup_run":        ("Backup S3",            "info"),
+            "bank_connect_start": ("Banca: avvio connect", "info"),
+            "bank_connect_ok":    ("Banca: collegata",     "success"),
+            "bank_connect_failed":("Banca: connect fallito","danger"),
+            "bank_sync":          ("Banca: sync",          "info"),
+            "bank_disconnect":    ("Banca: scollegata",    "warning"),
+            "bank_match_manual":  ("Banca: match manuale", "primary"),
+            "bank_ignore":        ("Banca: tx ignorata",   "secondary"),
+            "bank_recon_notify":  ("Banca: notifica digest","primary"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 
@@ -559,6 +568,97 @@ class BandoMatch(db.Model):
         if s >= 40:
             return ("Media", "primary")
         return ("Bassa", "secondary")
+
+
+class BankAccount(db.Model):
+    """Conto bancario di un utente, collegato via GoCardless Bank Account Data (PSD2).
+    Ogni utente può avere più conti (fino al limite PSD2 di 90 giorni di accesso prima
+    della re-auth)."""
+    __tablename__ = "bank_accounts"
+    __table_args__ = (db.UniqueConstraint("user_id", "external_account_id",
+                                          name="uq_user_extacc"),)
+
+    id                   = db.Column(db.Integer, primary_key=True)
+    user_id              = db.Column(db.Integer, db.ForeignKey("users.id"),
+                                     nullable=False, index=True)
+    requisition_id       = db.Column(db.String(80), index=True)   # ID GoCardless della requisition
+    external_account_id  = db.Column(db.String(80), nullable=False)  # account_id GoCardless
+    iban                 = db.Column(db.String(40), default="")
+    institution_id       = db.Column(db.String(80))               # es. "INTESA_SANPAOLO_BCITITMM"
+    institution_name     = db.Column(db.String(120))
+    owner_name           = db.Column(db.String(200), default="")
+    name                 = db.Column(db.String(200), default="")  # nome del conto se fornito
+    currency             = db.Column(db.String(8), default="EUR")
+    status               = db.Column(db.String(20), default="linked")  # linked / expired / error / disabled
+    expires_at           = db.Column(db.DateTime, nullable=True)  # quando scade l'autorizzazione PSD2 (90 gg)
+    last_sync_at         = db.Column(db.DateTime, nullable=True)
+    last_error           = db.Column(db.Text, default="")
+    created_at           = db.Column(db.DateTime, default=datetime.utcnow)
+
+    transactions = db.relationship("BankTransaction", back_populates="account",
+                                   cascade="all, delete-orphan")
+
+    @property
+    def status_label(self):
+        return {
+            "linked":   ("Collegato",       "success"),
+            "expired":  ("Scaduto (re-auth)","warning"),
+            "error":    ("Errore",          "danger"),
+            "disabled": ("Disabilitato",    "secondary"),
+        }.get(self.status, ("?", "secondary"))
+
+    @property
+    def days_until_expiry(self):
+        if not self.expires_at:
+            return None
+        return (self.expires_at - datetime.utcnow()).days
+
+
+class BankTransaction(db.Model):
+    """Singola transazione scaricata da una banca via GoCardless. Solo le entrate
+    (amount > 0) sono usate per riconciliazione con le fatture."""
+    __tablename__ = "bank_transactions"
+    __table_args__ = (db.UniqueConstraint("bank_account_id", "external_id",
+                                          name="uq_acc_extid"),)
+
+    id                = db.Column(db.Integer, primary_key=True)
+    bank_account_id   = db.Column(db.Integer, db.ForeignKey("bank_accounts.id"),
+                                  nullable=False, index=True)
+    user_id           = db.Column(db.Integer, db.ForeignKey("users.id"),
+                                  nullable=False, index=True)  # denormalizzato per query veloci
+    external_id       = db.Column(db.String(120), nullable=False)  # transactionId GoCardless
+    booking_date      = db.Column(db.Date, nullable=True, index=True)
+    value_date        = db.Column(db.Date, nullable=True)
+    amount            = db.Column(db.Float, nullable=False)
+    currency          = db.Column(db.String(8), default="EUR")
+    debtor_name       = db.Column(db.String(200), default="")  # chi ha pagato
+    debtor_iban       = db.Column(db.String(40), default="")
+    description       = db.Column(db.Text, default="")          # remittanceInformation
+    raw_data          = db.Column(db.Text, default="{}")        # JSON completo per audit/debug
+
+    # Matching con Invoice
+    matched_invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"),
+                                   nullable=True, index=True)
+    status            = db.Column(db.String(20), default="pending", index=True)
+    # pending | auto_matched | manual_matched | ignored | non_invoice (uscita o non rilevante)
+    match_confidence  = db.Column(db.Integer, default=0)        # 0-100
+    match_reason      = db.Column(db.Text, default="")
+    matched_at        = db.Column(db.DateTime, nullable=True)
+    matched_by_user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
+    created_at        = db.Column(db.DateTime, default=datetime.utcnow)
+
+    account         = db.relationship("BankAccount", back_populates="transactions")
+    matched_invoice = db.relationship("Invoice", foreign_keys=[matched_invoice_id])
+
+    @property
+    def status_label(self):
+        return {
+            "pending":        ("Da riconciliare",  "warning"),
+            "auto_matched":   ("Match automatico", "success"),
+            "manual_matched": ("Match manuale",    "primary"),
+            "ignored":        ("Ignorata",         "secondary"),
+            "non_invoice":    ("Non fattura",      "secondary"),
+        }.get(self.status, ("?", "secondary"))
 
 
 class AppSettings(db.Model):

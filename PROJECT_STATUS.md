@@ -184,6 +184,16 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 ### Bandi di finanziamento
 - [x] **Bandi MVP** — scraping AI da MIMIT/Invitalia (estensibile), matching AI personalizzato sul profilo utente (ATECO/regione/dimensione/descrizione), lista filtrabile per score, save/dismiss, sync giornaliero alle 06:00. Sezione "Mio profilo" estesa con campi per matching.
 
+### Riconciliazione bancaria (GoCardless Bank Account Data, PSD2)
+- [x] Connessione conti bancari italiani via OAuth/SCA (qualsiasi banca italiana coperta da Nordigen/GoCardless)
+- [x] Sync giornaliero transazioni alle 07:00 (incrementale, ultimi 14gg)
+- [x] Auto-match transazione → fattura (importo + numero fattura/P.IVA/nome cliente nella causale, score 0-100)
+- [x] Riconciliazione automatica se score≥80 e candidato unico → fattura marcata pagata + payment_ref `bank:<tx_id>`
+- [x] Coda manuale `/bank/reconciliation` con UI per match dubbi (top 5 candidati per ogni tx + opzione "forza match" su fattura arbitraria)
+- [x] Notifica email + WhatsApp digest dopo sync (auto-matched + pending count)
+- [x] Re-auth ogni 90gg (limite PSD2, alert 14gg prima della scadenza)
+- [x] Provider gratuito fino a 50.000 tx/mese, secret_id+secret_key in admin settings cifrati at-rest
+
 ### Nice to have
 - [x] **Dashboard admin con metriche di sistema** (utenti, fatture, attività, errori) → `/admin/metrics`
 - [x] **Resend** come alternativa SMTP (provider configurabile in Impostazioni admin, fallback automatico)

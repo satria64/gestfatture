@@ -242,6 +242,123 @@ def notify_owner_of_overdue(user, invoice) -> dict:
     return result
 
 
+# ─── Notifiche digest RICONCILIAZIONE BANCARIA ───────────────────────────────
+def notify_owner_of_bank_reconciliation(user, db, auto_matched: list, pending_count: int) -> dict:
+    """Notifica titolare del risultato del sync bancario giornaliero.
+    auto_matched: lista di tuple (BankTransaction, Invoice) appena riconciliate.
+    pending_count: quante transazioni restano in coda manuale.
+    """
+    from models import UserSetting, AppSettings, AuditLog
+    result = {"email": None, "whatsapp": None}
+
+    if not auto_matched and pending_count == 0:
+        return result
+
+    email_on = UserSetting.get(user.id, "notify_email_enabled") == "true"
+    wa_on    = UserSetting.get(user.id, "notify_whatsapp_enabled") == "true"
+    base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000").rstrip("/")
+    company  = (UserSetting.get(user.id, "company_name")
+                or AppSettings.get("company_name", "GestFatture"))
+
+    n_auto = len(auto_matched)
+    subj = f"💰 {n_auto} pagament{'i' if n_auto != 1 else 'o'} riconciliato"
+    if n_auto == 0:
+        subj = f"⏳ {pending_count} pagament{'i' if pending_count != 1 else 'o'} da riconciliare"
+
+    rows_html = ""
+    for tx, inv in auto_matched[:10]:
+        amt = f"€ {tx.amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+        rows_html += f"""<tr>
+          <td style="padding:8px;border-bottom:1px solid #e5e7eb">
+            <strong>{inv.number}</strong> · {inv.client.name if inv.client else ''}
+            <div style="font-size:11px;color:#6b7280">da {tx.debtor_name or 'sconosciuto'}</div>
+          </td>
+          <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">
+            <strong style="color:#16a34a">{amt}</strong>
+          </td>
+        </tr>"""
+
+    if email_on and user.email:
+        cfg = {"user": AppSettings.get("smtp_user", "")}
+        if cfg["user"]:
+            html = f"""<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;background:#f8fafc;padding:20px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)">
+    <div style="background:#1e3a5f;color:#fff;padding:20px">
+      <h2 style="margin:0">💰 Riconciliazione bancaria</h2>
+      <p style="margin:6px 0 0;opacity:.8;font-size:13px">{company}</p>
+    </div>
+    <div style="padding:24px">
+      <p>Ciao <strong>{user.username}</strong>,</p>
+      {f'<p>Ho riconciliato automaticamente <strong>{n_auto} pagamento/i</strong>:</p><table style="width:100%;border-collapse:collapse;margin:12px 0">{rows_html}</table>' if n_auto else ''}
+      {f'<p style="background:#fffbeb;border:1px solid #fde68a;padding:12px;border-radius:6px"><strong>⏳ {pending_count} pagamenti</strong> richiedono il tuo intervento manuale (importo o causale ambigua).</p>' if pending_count else ''}
+      <p style="text-align:center;margin:24px 0">
+        <a href="{base_url}/bank/reconciliation"
+           style="background:#1e3a5f;color:#fff;padding:12px 28px;border-radius:6px;
+                  text-decoration:none;font-weight:bold;display:inline-block">
+          {'Vai alla coda riconciliazione →' if pending_count else 'Vai alle banche →'}
+        </a>
+      </p>
+    </div>
+  </div>
+</body></html>"""
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subj
+            msg["From"]    = f"{company} <{cfg['user']}>"
+            msg["To"]      = user.email
+            msg.attach(MIMEText(html, "html", "utf-8"))
+            try:
+                from email_service import deliver_email
+                ok, info = deliver_email(
+                    msg=msg, subject=subj, recipient=user.email,
+                    html=html, plain="",
+                    sender_name=company, sender_email=cfg["user"],
+                )
+                result["email"] = (ok, info)
+            except Exception as e:
+                result["email"] = (False, str(e))
+
+    if wa_on:
+        phone  = (user.phone or "").strip()
+        apikey = UserSetting.get(user.id, "whatsapp_apikey", "").strip()
+        if phone and apikey:
+            phone_clean = phone.lstrip("+").replace(" ", "")
+            text_lines = [f"💰 *Riconciliazione bancaria*\n"]
+            if n_auto:
+                text_lines.append(f"✅ *{n_auto} pagament{'i' if n_auto != 1 else 'o'}* riconciliat{'i' if n_auto != 1 else 'o'} automaticamente.")
+                for tx, inv in auto_matched[:3]:
+                    amt = f"€{tx.amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    text_lines.append(f"  • {inv.number} ({amt}) da {(tx.debtor_name or '?')[:40]}")
+            if pending_count:
+                text_lines.append(f"\n⏳ *{pending_count} da riconciliare manualmente*.")
+            text_lines.append(f"\n👉 {base_url}/bank/reconciliation")
+            text = "\n".join(text_lines)
+            try:
+                r = requests.get(
+                    "https://api.callmebot.com/whatsapp.php",
+                    params={"phone": phone_clean, "text": text, "apikey": apikey},
+                    timeout=15,
+                )
+                ok = r.status_code == 200 and any(k in r.text.lower() for k in ("queued", "sent", "ok"))
+                result["whatsapp"] = (ok, "OK" if ok else _clean_callmebot_response(r.text)[:200])
+            except Exception as e:
+                result["whatsapp"] = (False, str(e))
+
+    try:
+        details = f"auto={n_auto}; pending={pending_count}; email={'OK' if result['email'] and result['email'][0] else 'no'}; wa={'OK' if result['whatsapp'] and result['whatsapp'][0] else 'no'}"
+        db.session.add(AuditLog(
+            user_id=user.id, username=user.username,
+            action="bank_recon_notify", target=f"u:{user.id}",
+            details=details[:2000],
+        ))
+        db.session.commit()
+    except Exception:
+        try: db.session.rollback()
+        except Exception: pass
+
+    return result
+
+
 # ─── Notifiche digest BANDI di finanziamento ─────────────────────────────────
 def _send_bandi_email_digest(user, matches) -> tuple[bool, str]:
     """Email digest al titolare con i nuovi bandi rilevanti."""

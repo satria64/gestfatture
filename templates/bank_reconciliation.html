@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}Riconciliazione bancaria – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+  <div>
+    <h2><i class="bi bi-list-check me-2"></i>Riconciliazione bancaria</h2>
+    <p class="text-muted small mb-0">
+      Transazioni in entrata che non sono state riconciliate automaticamente.
+      Scegli a quale fattura corrispondono, oppure ignorale (rimborsi, prestiti,
+      versamenti propri ecc.).
+    </p>
+  </div>
+  <a href="{{ url_for('bank_overview') }}" class="btn btn-outline-secondary">
+    <i class="bi bi-arrow-left me-1"></i> Banche
+  </a>
+</div>
+
+{% if rows %}
+<div class="d-flex flex-column gap-3">
+  {% for tx, candidates in rows %}
+  <div class="card border-0 shadow-sm">
+    <div class="card-body">
+      <div class="row g-3">
+        <!-- Colonna SX: dettagli transazione -->
+        <div class="col-md-5">
+          <div class="d-flex justify-content-between align-items-start">
+            <div>
+              <div class="small text-muted">
+                {{ tx.booking_date.strftime('%d/%m/%Y') if tx.booking_date else '—' }}
+              </div>
+              <div class="fs-4 fw-bold text-success">
+                + {{ '%.2f'|format(tx.amount)|replace('.', ',') }} {{ tx.currency }}
+              </div>
+            </div>
+            <span class="badge bg-warning text-dark">In coda</span>
+          </div>
+          {% if tx.debtor_name %}
+          <div class="mt-2 small">
+            <strong>Da:</strong> {{ tx.debtor_name }}
+            {% if tx.debtor_iban %}<div class="text-muted">{{ tx.debtor_iban }}</div>{% endif %}
+          </div>
+          {% endif %}
+          {% if tx.description %}
+          <div class="mt-2 small p-2 bg-light rounded text-muted"
+               style="font-family:monospace; word-break:break-word">
+            {{ tx.description[:300] }}{% if tx.description|length > 300 %}…{% endif %}
+          </div>
+          {% endif %}
+          <div class="mt-2 d-flex gap-2">
+            <form method="post" action="{{ url_for('bank_ignore_tx', tx_id=tx.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <button class="btn btn-sm btn-outline-secondary"
+                      onclick="return confirm('Marcare come ignorata? Non sarà più considerata.')">
+                <i class="bi bi-x-lg me-1"></i> Ignora
+              </button>
+            </form>
+          </div>
+        </div>
+
+        <!-- Colonna DX: candidati fattura -->
+        <div class="col-md-7">
+          <div class="small fw-semibold text-muted mb-2">
+            FATTURE CANDIDATE (importo coincidente)
+          </div>
+          {% if candidates %}
+          <div class="d-flex flex-column gap-1">
+            {% for inv, score, reason in candidates %}
+            <form method="post" action="{{ url_for('bank_match_manual', tx_id=tx.id, inv_id=inv.id) }}"
+                  class="border rounded p-2 d-flex justify-content-between align-items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="flex-grow-1" style="min-width:0">
+                <div class="d-flex gap-2 align-items-center mb-1 flex-wrap">
+                  <span class="badge bg-{% if score >= 80 %}success{% elif score >= 50 %}primary{% else %}secondary{% endif %}">
+                    {{ score }}/100
+                  </span>
+                  <strong>Fattura {{ inv.number }}</strong>
+                  <span class="small text-muted">·</span>
+                  <span class="small">{{ inv.client.name }}</span>
+                </div>
+                <div class="small text-muted">
+                  {{ '%.2f'|format(inv.amount)|replace('.', ',') }}€ ·
+                  scadenza {{ inv.due_date.strftime('%d/%m/%Y') }}
+                  · <em>{{ reason }}</em>
+                </div>
+              </div>
+              <button class="btn btn-sm btn-success">
+                <i class="bi bi-check-lg me-1"></i> Match
+              </button>
+            </form>
+            {% endfor %}
+          </div>
+          {% else %}
+          <p class="text-muted small">
+            Nessuna fattura aperta con questo importo.
+            {% if open_invoices %}
+              <br>Fai un match con una qualsiasi fattura aperta:
+            {% endif %}
+          </p>
+          {% endif %}
+
+          <!-- Match con fattura arbitraria -->
+          {% if open_invoices %}
+          <details class="mt-2">
+            <summary class="small text-muted" style="cursor:pointer">
+              Match con un'altra fattura aperta (importo diverso)…
+            </summary>
+            <form method="post" action="" class="mt-2 d-flex gap-2"
+                  onsubmit="this.action = '/bank/reconciliation/{{ tx.id }}/match/' + this.invid.value">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <select name="invid" class="form-select form-select-sm" required>
+                <option value="">— scegli fattura —</option>
+                {% for inv in open_invoices %}
+                <option value="{{ inv.id }}">
+                  #{{ inv.number }} — {{ inv.client.name }} — {{ '%.2f'|format(inv.amount)|replace('.', ',') }}€
+                </option>
+                {% endfor %}
+              </select>
+              <button class="btn btn-sm btn-outline-primary"
+                      onclick="return confirm('Forzare match con importo diverso? La fattura sarà comunque marcata pagata.')">
+                Forza
+              </button>
+            </form>
+          </details>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center text-muted py-5">
+  <i class="bi bi-check-circle fs-1 d-block mb-2 text-success"></i>
+  <p>Nessuna transazione in coda. Tutte le entrate sono state riconciliate o ignorate.</p>
+</div>
+{% endif %}
+{% endblock %}
