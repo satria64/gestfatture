@@ -13,11 +13,18 @@ Setup CallMeBot (una volta sola, per ogni utente):
 """
 
 import logging
+import re
 import smtplib
 import requests
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+
+def _clean_callmebot_response(s: str) -> str:
+    """Rimuove i tag HTML dalla risposta CallMeBot e normalizza gli spazi."""
+    s = re.sub(r"<[^>]+>", "", s or "")
+    return re.sub(r"\s+", " ", s).strip()
 
 log = logging.getLogger(__name__)
 
@@ -208,7 +215,7 @@ def send_whatsapp_to_owner(user, invoice) -> tuple[bool, str]:
         if r.status_code == 200 and ("queued" in body_low or "sent" in body_low or "ok" in body_low):
             return True, "Messaggio WhatsApp inviato"
         # Errore tipico: numero non registrato sul bot
-        return False, f"CallMeBot HTTP {r.status_code}: {r.text[:200]}"
+        return False, f"CallMeBot HTTP {r.status_code}: {_clean_callmebot_response(r.text)[:200]}"
     except Exception as e:
         log.error("Errore WhatsApp a %s: %s", user.username, e)
         return False, str(e)
@@ -367,7 +374,7 @@ def _send_pec_whatsapp_to_owner(user, pec_msg) -> tuple[bool, str]:
         body_low = r.text.lower()
         if r.status_code == 200 and ("queued" in body_low or "sent" in body_low or "ok" in body_low):
             return True, "WhatsApp PEC inviato"
-        return False, f"CallMeBot HTTP {r.status_code}: {r.text[:200]}"
+        return False, f"CallMeBot HTTP {r.status_code}: {_clean_callmebot_response(r.text)[:200]}"
     except Exception as e:
         log.error("Errore WhatsApp PEC: %s", e)
         return False, str(e)
