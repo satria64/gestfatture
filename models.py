@@ -211,6 +211,22 @@ class Reminder(db.Model):
     invoice = db.relationship("Invoice", back_populates="reminders")
 
 
+# Chiavi UserSetting/AppSettings i cui valori vengono cifrati at-rest se la
+# env var SECRETS_ENCRYPTION_KEY è configurata. Idempotente in lettura.
+SENSITIVE_USER_KEYS = {
+    "whatsapp_apikey",
+    "integration_pec_password",
+    "integration_fic_access_token",
+    "integration_fic_refresh_token",
+    "integration_fic_client_secret",
+}
+SENSITIVE_APP_KEYS = {
+    "smtp_password", "anthropic_api_key", "stripe_webhook_secret",
+    "paypal_webhook_id", "resend_api_key",
+    "backup_s3_secret_access_key",
+}
+
+
 class UserSetting(db.Model):
     """Impostazioni per-utente (integrazioni, branding, ecc.)."""
     __tablename__ = "user_settings"
@@ -224,15 +240,23 @@ class UserSetting(db.Model):
     @staticmethod
     def get(user_id: int, key: str, default: str = "") -> str:
         row = UserSetting.query.filter_by(user_id=user_id, key=key).first()
-        return row.value if row else default
+        v = row.value if row else default
+        if key in SENSITIVE_USER_KEYS and v:
+            from crypto_service import decrypt
+            v = decrypt(v)
+        return v
 
     @staticmethod
     def set(user_id: int, key: str, value):
+        v = str(value or "")
+        if key in SENSITIVE_USER_KEYS and v:
+            from crypto_service import encrypt
+            v = encrypt(v)
         row = UserSetting.query.filter_by(user_id=user_id, key=key).first()
         if row:
-            row.value = str(value)
+            row.value = v
         else:
-            db.session.add(UserSetting(user_id=user_id, key=key, value=str(value)))
+            db.session.add(UserSetting(user_id=user_id, key=key, value=v))
         db.session.commit()
 
 
@@ -286,6 +310,10 @@ class AuditLog(db.Model):
             "pec_notify_failed": ("PEC notifica fallita", "danger"),
             "pec_notify_test":   ("PEC notifica test",    "info"),
             "pec_reanalyzed":    ("PEC ri-analizzata",    "info"),
+            "bandi_notify_digest": ("Bandi: digest inviato", "primary"),
+            "survey_sent":       ("Survey inviato",       "info"),
+            "secrets_migrated":  ("Secret cifrati",       "primary"),
+            "backup_run":        ("Backup S3",            "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 
@@ -342,6 +370,32 @@ class SupportTicket(db.Model):
     @property
     def messages_count(self):
         return len(self.messages)
+
+
+class TicketSurvey(db.Model):
+    """Survey di soddisfazione inviato all'utente quando un ticket viene
+    risolto/chiuso. Accesso pubblico via token firmato (1 per ticket)."""
+    __tablename__ = "ticket_surveys"
+
+    id           = db.Column(db.Integer, primary_key=True)
+    ticket_id    = db.Column(db.Integer, db.ForeignKey("support_tickets.id"),
+                             nullable=False, unique=True, index=True)
+    rating       = db.Column(db.Integer, nullable=True)   # 1-5 (null = non ancora compilato)
+    comment      = db.Column(db.Text, default="")
+    sent_at      = db.Column(db.DateTime, default=datetime.utcnow)
+    submitted_at = db.Column(db.DateTime, nullable=True)
+
+    ticket = db.relationship("SupportTicket")
+
+    @property
+    def rating_label(self):
+        return {
+            1: ("😡 Pessimo",     "danger"),
+            2: ("😞 Insoddisfatto","warning"),
+            3: ("😐 Neutro",       "secondary"),
+            4: ("🙂 Buono",        "primary"),
+            5: ("😍 Eccellente",   "success"),
+        }.get(self.rating or 0, ("In attesa", "light"))
 
 
 class TicketMessage(db.Model):
@@ -517,13 +571,21 @@ class AppSettings(db.Model):
     @staticmethod
     def get(key, default=""):
         row = AppSettings.query.filter_by(key=key).first()
-        return row.value if row else default
+        v = row.value if row else default
+        if key in SENSITIVE_APP_KEYS and v:
+            from crypto_service import decrypt
+            v = decrypt(v)
+        return v
 
     @staticmethod
     def set(key, value):
+        v = str(value or "")
+        if key in SENSITIVE_APP_KEYS and v:
+            from crypto_service import encrypt
+            v = encrypt(v)
         row = AppSettings.query.filter_by(key=key).first()
         if row:
-            row.value = str(value)
+            row.value = v
         else:
-            db.session.add(AppSettings(key=key, value=str(value)))
+            db.session.add(AppSettings(key=key, value=v))
         db.session.commit()

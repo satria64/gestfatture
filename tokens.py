@@ -86,3 +86,35 @@ def make_portal_url(client, base_url: str = "") -> str:
     base_url = base_url.rstrip("/")
     token = make_portal_token(client.id, client.user_id)
     return f"{base_url}/portal/{token}"
+
+
+# ─── Survey post-risoluzione ticket ─────────────────────────────────────────
+SURVEY_SALT    = "gestfatture-ticket-survey-v1"
+SURVEY_MAX_AGE = 60 * 60 * 24 * 90  # 90 giorni
+
+
+def _survey_serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=SURVEY_SALT)
+
+
+def make_survey_token(survey_id: int, ticket_id: int) -> str:
+    return _survey_serializer().dumps({"s": survey_id, "t": ticket_id})
+
+
+def verify_survey_token(token: str, max_age: int = SURVEY_MAX_AGE) -> dict | None:
+    try:
+        payload = _survey_serializer().loads(token, max_age=max_age)
+        if isinstance(payload, dict) and "s" in payload and "t" in payload:
+            return payload
+    except (BadSignature, SignatureExpired):
+        return None
+    return None
+
+
+def make_survey_url(survey, base_url: str = "") -> str:
+    from models import AppSettings
+    if not base_url:
+        base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000")
+    base_url = base_url.rstrip("/")
+    token = make_survey_token(survey.id, survey.ticket_id)
+    return f"{base_url}/survey/{token}"

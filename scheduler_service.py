@@ -152,8 +152,9 @@ def run_bandi_sync(app):
             log.error("Bandi scraping globale fallito: %s", e, exc_info=True)
             return
 
-        # Matching per ogni utente reale (non ospite)
+        # Matching per ogni utente reale (non ospite) + notifica digest
         users = User.query.filter(~User.username.like("ospite_%")).all()
+        from notification_service import notify_owner_of_new_bandi
         for u in users:
             try:
                 n = compute_matches_for_user(
@@ -162,6 +163,14 @@ def run_bandi_sync(app):
                 log.info("Bandi matching per u=%s: %d match aggiornati", u.username, n)
             except Exception as e:
                 log.error("Matching bandi fallito per u=%s: %s", u.username, e)
+                continue
+            # Digest notifica (email + WhatsApp) per i nuovi match >= 75
+            try:
+                res = notify_owner_of_new_bandi(u, db, min_score=75)
+                if res["count"]:
+                    log.info("Bandi digest u=%s: %d nuovi notificati", u.username, res["count"])
+            except Exception as e:
+                log.error("Notifica digest bandi fallita per u=%s: %s", u.username, e)
 
 
 def start_scheduler(app):
@@ -218,8 +227,25 @@ def start_scheduler(app):
         coalesce=True,
     )
 
+    # Backup S3 settimanale (lunedi' alle 03:00)
+    def _backup_runner():
+        try:
+            from backup_service import run_backup
+            r = run_backup(app)
+            log.info("Backup settimanale: %s", r)
+        except Exception as e:
+            log.error("Backup settimanale fallito: %s", e, exc_info=True)
+    _scheduler.add_job(
+        func=_backup_runner,
+        trigger=CronTrigger(day_of_week="mon", hour=3, minute=0),
+        id="backup_weekly",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
-    log.info("Scheduler avviato – solleciti 08:00, bandi 06:00, integrazioni (folder 30s, PEC 5min, FiC 30min)")
+    log.info("Scheduler avviato – solleciti 08:00, bandi 06:00, backup mon 03:00, integrazioni")
     return _scheduler
 
 

@@ -1,0 +1,342 @@
+{% extends "base.html" %}
+{% block title %}Aiuto – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-question-circle me-2"></i>Knowledge base</h2>
+  <p class="text-muted small mb-3">
+    Guida rapida alle funzionalità di GestFatture. Cerca per parola chiave o
+    naviga le categorie.
+  </p>
+  <input type="search" id="kbSearch" class="form-control" placeholder="🔍 Cerca nelle FAQ (es. 'sollecito', 'whatsapp', 'PEC')">
+</div>
+
+<div class="row g-4">
+  <!-- TOC -->
+  <div class="col-lg-3 d-none d-lg-block">
+    <div class="position-sticky" style="top:1rem">
+      <div class="card border-0 shadow-sm">
+        <div class="card-header fw-semibold small">Indice</div>
+        <div class="list-group list-group-flush small">
+          <a href="#start"        class="list-group-item list-group-item-action">🚀 Primi passi</a>
+          <a href="#fatture"      class="list-group-item list-group-item-action">📄 Fatture</a>
+          <a href="#solleciti"    class="list-group-item list-group-item-action">📨 Solleciti</a>
+          <a href="#notifiche"    class="list-group-item list-group-item-action">🔔 Notifiche</a>
+          <a href="#integrazioni" class="list-group-item list-group-item-action">🔌 Integrazioni</a>
+          <a href="#pagamenti"    class="list-group-item list-group-item-action">💳 Pagamenti</a>
+          <a href="#bandi"        class="list-group-item list-group-item-action">💰 Bandi</a>
+          <a href="#portal"       class="list-group-item list-group-item-action">🔗 Customer portal</a>
+          <a href="#gdpr"         class="list-group-item list-group-item-action">🛡 GDPR</a>
+          <a href="#sicurezza"    class="list-group-item list-group-item-action">🔐 Sicurezza</a>
+          <a href="#problemi"     class="list-group-item list-group-item-action">🔧 Risoluzione problemi</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Contenuto -->
+  <div class="col-lg-9">
+    {# Macro accordion per FAQ #}
+    {% macro faq(id, q, a) %}
+    <div class="kb-item accordion-item" data-search="{{ q|lower }} {{ a|striptags|lower }}">
+      <h2 class="accordion-header">
+        <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                data-bs-target="#faq-{{ id }}">
+          {{ q }}
+        </button>
+      </h2>
+      <div id="faq-{{ id }}" class="accordion-collapse collapse">
+        <div class="accordion-body small">{{ a|safe }}</div>
+      </div>
+    </div>
+    {% endmacro %}
+
+    <!-- PRIMI PASSI -->
+    <h4 id="start" class="mt-2 mb-3">🚀 Primi passi</h4>
+    <div class="accordion mb-4" id="kbStart">
+      {{ faq("start1", "Ho appena fatto login admin: cosa configurare per primo?", "
+        Vai su <a href='/settings'>Impostazioni</a> e compila in ordine:
+        <ol>
+          <li><strong>Mio profilo</strong>: email, telefono WhatsApp, P.IVA della tua azienda</li>
+          <li><strong>Server SMTP</strong>: configurazione invio email (Gmail con App Password o PEC)</li>
+          <li><strong>Anthropic API key</strong>: per l'estrazione PDF intelligente e l'analisi PEC/AI chat</li>
+          <li><strong>Dati legali</strong>: ragione sociale, P.IVA, indirizzo, email contatto privacy (per pagine /privacy e /terms)</li>
+          <li><strong>URL pubblico app</strong>: l'indirizzo HTTPS del tuo dominio</li>
+        </ol>
+      ") }}
+      {{ faq("start2", "Come cambio la password?", "
+        Vai su <a href='/settings'>Impostazioni</a> → sezione 'Cambia password' in fondo.
+        Requisiti: minimo 8 caratteri, almeno 1 lettera + 1 numero, niente password comuni.
+      ") }}
+      {{ faq("start3", "Posso provare l'app prima di registrarmi?", "
+        Sì, dalla pagina di login click <strong>'Prova come Ospite'</strong>: crea un account
+        temporaneo con dati di test separati. Al logout l'account e tutti i dati vengono
+        cancellati automaticamente.
+      ") }}
+    </div>
+
+    <!-- FATTURE -->
+    <h4 id="fatture" class="mt-4 mb-3">📄 Fatture</h4>
+    <div class="accordion mb-4">
+      {{ faq("f1", "Quali tipi di documento posso gestire?", "
+        Quattro tipi: <strong>TD01</strong> (fattura standard, sollecitabile),
+        <strong>TD04</strong> (nota di credito — esclusa dai solleciti, può compensare una fattura),
+        <strong>TD05</strong> (nota di debito, sollecitabile come fattura),
+        <strong>TD06</strong> (parcella).
+      ") }}
+      {{ faq("f2", "Quali formati di import sono supportati?", "
+        Tutti questi: <strong>CSV</strong>, <strong>Excel</strong> (.xlsx), <strong>PDF</strong>
+        (con AI o regex), <strong>XML FatturaPA</strong> (parsing nativo, 100% preciso),
+        <strong>.xml.p7m</strong> (CADES firmato), <strong>ZIP</strong> con dentro più file misti.
+        Vai su <a href='/invoices/import'>Fatture → Importa CSV/Excel</a>.
+      ") }}
+      {{ faq("f3", "Cosa succede se carico un PDF che non è una fattura?", "
+        L'app rileva automaticamente che non è una fattura (lettera, scontrino, contratto,
+        brochure ecc.) e lo salta con un messaggio chiaro. Non vengono creati record spurious.
+      ") }}
+      {{ faq("f4", "L'AI ha estratto dati sbagliati dal mio PDF, cosa faccio?", "
+        Vai sulla fattura → click 'Modifica' e correggi i campi a mano. In Impostazioni puoi
+        anche scegliere un modello AI più potente (Sonnet 4.6 → Opus 4.7) per estrazioni più
+        accurate, a costo leggermente maggiore.
+      ") }}
+      {{ faq("f5", "Cos'è una fattura passiva e come viene riconosciuta?", "
+        È una fattura che hai <strong>ricevuto</strong> da un fornitore (non emessa da te).
+        L'app la riconosce confrontando la P.IVA dell'utente (in 'Mio profilo') con quella
+        dell'emittente nel PDF/XML. Se sono diverse, l'altra P.IVA viene presa come cliente.
+      ") }}
+      {{ faq("f6", "Come unisco clienti duplicati?", "
+        Vai su <a href='/clients'>Clienti</a> → bottone 'Unifica duplicati' in alto.
+        L'app raggruppa per P.IVA e sposta tutte le fatture sul cliente più vecchio,
+        mantenendo i dati più completi.
+      ") }}
+    </div>
+
+    <!-- SOLLECITI -->
+    <h4 id="solleciti" class="mt-4 mb-3">📨 Solleciti automatici</h4>
+    <div class="accordion mb-4">
+      {{ faq("s1", "Quando partono i solleciti?", "
+        Job giornaliero alle <strong>08:00</strong>. Pre-scadenza: 7, 3, 1 giorno prima.
+        Post-scadenza: 1, 7, 15, 30 giorni dopo. Tipi: pre_scadenza, sollecito_1,
+        sollecito_2, sollecito_3, diffida formale.
+      ") }}
+      {{ faq("s2", "I solleciti includono il PDF della fattura?", "
+        Sì, automaticamente. Se hai caricato un PDF per la fattura, viene allegato a ogni
+        sollecito email.
+      ") }}
+      {{ faq("s3", "Posso forzare l'esecuzione del job senza aspettare le 08:00?", "
+        Sì, click <strong>'Esegui job ora'</strong> in basso nel sidebar.
+      ") }}
+      {{ faq("s4", "Come stoppo i solleciti per una fattura specifica?", "
+        Marcala come <em>pagata</em>, oppure cambia lo stato in <em>annullata</em> dalla
+        pagina di dettaglio. Le note di credito (TD04) non vengono mai sollecitate.
+      ") }}
+    </div>
+
+    <!-- NOTIFICHE -->
+    <h4 id="notifiche" class="mt-4 mb-3">🔔 Notifiche al titolare</h4>
+    <div class="accordion mb-4">
+      {{ faq("n1", "Come configuro WhatsApp via CallMeBot?", "
+        Setup una tantum:
+        <ol>
+          <li>Aggiungi il numero <code>+34 644 51 95 23</code> ai contatti del tuo telefono</li>
+          <li>Da WhatsApp scrivigli: <code>I allow callmebot to send me messages</code></li>
+          <li>Riceverai una API key (numero di 7 cifre)</li>
+          <li>Inseriscila in <a href='/settings'>Impostazioni</a> → Notifiche → API key WhatsApp</li>
+          <li>Verifica che 'Telefono WhatsApp' nel tuo profilo abbia il prefisso (es. <code>+39</code>)</li>
+          <li>Attiva il toggle 'Notifiche WhatsApp'</li>
+          <li>Click 'Prova WhatsApp' per testare</li>
+        </ol>
+      ") }}
+      {{ faq("n2", "Cosa sono le 'quick action' nelle notifiche?", "
+        Link cliccabili nelle email/WhatsApp che ti mandano direttamente all'azione: invia
+        sollecito, marca pagata, stop notifiche. Token firmato (validità 30 giorni). C'è
+        sempre una conferma 2-step prima dell'invio reale al cliente.
+      ") }}
+      {{ faq("n3", "Quando ricevo notifica WhatsApp di una PEC istituzionale?", "
+        Ogni volta che arriva una PEC da AdE/INPS/INAIL nella tua casella, dopo l'analisi
+        AI ricevi WhatsApp + email con riassunto, urgenza, scadenza ed eventuale azione
+        consigliata. Funziona se hai abilitato l'integrazione PEC e l'analisi AI.
+      ") }}
+    </div>
+
+    <!-- INTEGRAZIONI -->
+    <h4 id="integrazioni" class="mt-4 mb-3">🔌 Integrazioni</h4>
+    <div class="accordion mb-4">
+      {{ faq("i1", "Come collego la mia casella PEC?", "
+        <a href='/my-integrations'>Mie integrazioni</a> → PEC IMAP. Inserisci host, porta
+        (993), email, password. Per <strong>Aruba</strong>: <code>imaps.pec.aruba.it</code>.
+        Per <strong>Legalmail</strong>: <code>mbox.cert.legalmail.it</code>.
+        Polling ogni 5 minuti.
+      ") }}
+      {{ faq("i2", "Cosa fa l'analisi AI delle PEC istituzionali?", "
+        Quando arriva una mail da AdE/INPS/INAIL, Claude analizza il contenuto e produce:
+        riassunto in 2-3 frasi, urgenza (alta/media/bassa), categoria (cartella, avviso,
+        intimazione...), scadenza eventuale, azione consigliata. Visibili in
+        <a href='/pec-inbox'>PEC Istituzionali</a>.
+      ") }}
+      {{ faq("i3", "Come collego Fatture in Cloud?", "
+        Serve l'admin: prima va creata l'app OAuth su FiC (configurazione in <a href='/integrations'>App FiC OAuth</a>).
+        Poi ogni utente collega il proprio account FiC da <a href='/my-integrations'>Mie integrazioni</a>.
+        Polling ogni 30 minuti. Importa automaticamente le fatture nuove.
+      ") }}
+      {{ faq("i4", "Cos'è la cartella locale?", "
+        Una cartella sul disco del server che viene monitorata ogni 30 secondi. Qualsiasi
+        XML/p7m/PDF/ZIP che ci copi dentro viene importato automaticamente. I file processati
+        vanno in una sottocartella 'processed/'.
+      ") }}
+    </div>
+
+    <!-- PAGAMENTI -->
+    <h4 id="pagamenti" class="mt-4 mb-3">💳 Pagamenti</h4>
+    <div class="accordion mb-4">
+      {{ faq("p1", "Come marca pagata una fattura automaticamente?", "
+        Configurando i webhook Stripe e/o PayPal in Impostazioni admin. Quando il cliente
+        paga, il webhook arriva all'app e segna la fattura come pagata. Per il matching
+        servono i metadata: <code>invoice_id</code> per Stripe, <code>custom_id</code> per
+        PayPal con l'ID o numero della fattura.
+      ") }}
+      {{ faq("p2", "Posso aggiungere un link di pagamento alle email di sollecito?", "
+        Sì, in 'Mio profilo' → <strong>Link pagamento predefinito</strong>. Verrà incluso
+        in tutti i solleciti. Sovrascrivibile sulla singola fattura se ne usi uno custom
+        per quel cliente.
+      ") }}
+    </div>
+
+    <!-- BANDI -->
+    <h4 id="bandi" class="mt-4 mb-3">💰 Bandi di finanziamento</h4>
+    <div class="accordion mb-4">
+      {{ faq("b1", "Come funziona il matching dei bandi?", "
+        Ogni notte alle 06:00 l'app fa scraping di portali pubblici (MIMIT, Invitalia)
+        ed estrae i bandi attivi. Poi per ciascun utente Claude calcola un punteggio
+        di rilevanza 0-100 confrontando il bando col tuo profilo (codice ATECO, regione,
+        dimensione, descrizione attività).
+      ") }}
+      {{ faq("b2", "Perché vedo pochi/nessun bando rilevante?", "
+        Quasi sempre perché il profilo è incompleto. Vai su <a href='/settings'>Impostazioni</a>
+        → Mio profilo → sezione 'Per i bandi di finanziamento' e compila ATECO, regione,
+        dimensione, descrizione attività. Più dettagli dai, più precisi sono i match.
+      ") }}
+      {{ faq("b3", "Posso forzare un sync immediato?", "
+        Sì, se sei admin: vai su <a href='/bandi'>Bandi</a> → click 'Sync ora' in alto.
+        Aspetta 30-60 sec. Costa ~€0.05-0.10 di Anthropic.
+      ") }}
+    </div>
+
+    <!-- CUSTOMER PORTAL -->
+    <h4 id="portal" class="mt-4 mb-3">🔗 Customer portal</h4>
+    <div class="accordion mb-4">
+      {{ faq("cp1", "Cos'è il customer portal?", "
+        Una pagina pubblica (no login) dove un tuo cliente vede solo le sue fatture aperte
+        e pagate, può scaricare i PDF e cliccare il link di pagamento se presente.
+      ") }}
+      {{ faq("cp2", "Come genero il link?", "
+        Vai su <a href='/clients'>Clienti</a> → apri un cliente → sidebar destra c'è la
+        card 'Portale cliente' con il link copiabile. Mandalo via email/WhatsApp/SMS al
+        cliente. Resta valido <strong>1 anno</strong>.
+      ") }}
+    </div>
+
+    <!-- GDPR -->
+    <h4 id="gdpr" class="mt-4 mb-3">🛡 GDPR e privacy</h4>
+    <div class="accordion mb-4">
+      {{ faq("g1", "Come esporto tutti i miei dati?", "
+        <a href='/settings'>Impostazioni</a> → 'I tuoi dati personali (GDPR)' → click
+        'Scarica ZIP'. Riceverai un archivio con: profilo, clienti, fatture (con solleciti),
+        ticket, PEC, audit log e PDF allegati. Conforme all'art. 20 GDPR.
+      ") }}
+      {{ faq("g2", "Come cancello permanentemente il mio account?", "
+        <a href='/settings'>Impostazioni</a> → 'Zona pericolosa — cancella account'
+        → expand → password + digita ELIMINA in maiuscolo → conferma. Vengono cancellati
+        permanentemente tutti i dati incluso PDF su disco. Conforme all'art. 17 GDPR.
+        L'audit log resta per tracciabilità (con user_id orfano).
+      ") }}
+      {{ faq("g3", "L'unico admin può cancellarsi?", "
+        No, l'app blocca l'auto-eliminazione dell'unico amministratore per evitare lock-out.
+        Promuovi prima un altro utente come admin, poi puoi cancellarti.
+      ") }}
+    </div>
+
+    <!-- SICUREZZA -->
+    <h4 id="sicurezza" class="mt-4 mb-3">🔐 Sicurezza</h4>
+    <div class="accordion mb-4">
+      {{ faq("sec1", "Come attivo la 2FA?", "
+        <a href='/settings'>Impostazioni</a> → 'Autenticazione a due fattori' → 'Attiva 2FA'
+        → scansiona il QR code con Google Authenticator/Authy/1Password → inserisci il
+        codice di 6 cifre per confermare → SALVA i 8 codici di backup in un posto sicuro
+        (li vedrai una sola volta).
+      ") }}
+      {{ faq("sec2", "Ho perso il telefono con l'app authenticator!", "
+        Hai 8 codici di backup generati al momento del setup. Usali al posto del codice
+        TOTP (sono accettati nello stesso campo). Ogni codice funziona una sola volta.
+      ") }}
+      {{ faq("sec3", "Cos'è l'audit log?", "
+        Registro di tutte le azioni sensibili (login, logout, cambio password, modifiche
+        admin, notifiche PEC, cancellazioni, ecc.). Visibile solo agli admin in
+        <a href='/admin/audit-log'>Audit Log</a>. Utile per indagare incidenti di sicurezza.
+      ") }}
+    </div>
+
+    <!-- TROUBLESHOOTING -->
+    <h4 id="problemi" class="mt-4 mb-3">🔧 Risoluzione problemi</h4>
+    <div class="accordion mb-4">
+      {{ faq("t1", "Le mie email finiscono in spam, come faccio?", "
+        Il problema è che Gmail SMTP non firma le email correttamente (manca SPF/DKIM/DMARC
+        sul dominio del mittente). Soluzione: passa a <strong>Resend</strong>:
+        <ol>
+          <li>Compra un dominio (es. su Cloudflare, ~$9/anno)</li>
+          <li>Crea account su <a href='https://resend.com' target='_blank'>resend.com</a></li>
+          <li>Verifica il dominio (Resend ti dà i record DNS da aggiungere)</li>
+          <li>Genera API key</li>
+          <li>In Impostazioni admin → 'Provider email' → seleziona Resend, incolla API key
+              e mittente <code>fatture@tuodominio.it</code></li>
+        </ol>
+      ") }}
+      {{ faq("t2", "Le notifiche WhatsApp PEC non arrivano", "
+        Apri una PEC istituzionale → click <strong>'Prova WhatsApp'</strong> nella sidebar.
+        Il messaggio di errore ti dirà esattamente cosa manca:
+        <code>apikey can not be empty</code> = manca API key CallMeBot in Impostazioni;
+        <code>phone number is not registered</code> = devi attivare CallMeBot dal tuo numero
+        (vedi 'Notifiche').
+      ") }}
+      {{ faq("t3", "L'analisi AI di una PEC mostra '[Analisi AI fallita: ...]'", "
+        Apri la PEC e click <strong>'Ri-analizza con AI'</strong> nella sidebar. Se fallisce
+        di nuovo, il messaggio di errore in flash ti dice il motivo (timeout, JSON invalido,
+        rate limit, ecc.).
+      ") }}
+      {{ faq("t4", "I PDF scansionati come immagine non vengono letti", "
+        Limite noto: pypdf non fa OCR. Servirebbe Tesseract o un OCR cloud. Workaround:
+        carica solo PDF testuali (esportati da gestionali) o XML FatturaPA.
+      ") }}
+      {{ faq("t5", "Render dice 'Application failed to respond'", "
+        Tipico se manca l'env var PORT o il start command non usa <code>$PORT</code>.
+        Verifica su Render → Settings → Start Command che ci sia
+        <code>gunicorn --bind 0.0.0.0:$PORT 'app:create_app()'</code>.
+      ") }}
+      {{ faq("t6", "Errore '__no such table__' al primo deploy", "
+        Il DB non è ancora migrato. Riavvia il servizio (Render → 'Manual Deploy' →
+        'Clear build cache & deploy'). All'avvio l'app esegue automaticamente la migrazione.
+      ") }}
+    </div>
+
+    <p class="text-muted small text-center mt-4">
+      Non trovi quello che cerchi?
+      <a href="{{ url_for('new_ticket') }}">Apri un ticket di assistenza</a>
+      oppure usa la chat AI in basso a destra.
+    </p>
+  </div>
+</div>
+
+<script>
+(function () {
+  var s = document.getElementById('kbSearch');
+  if (!s) return;
+  s.addEventListener('input', function () {
+    var q = s.value.trim().toLowerCase();
+    document.querySelectorAll('.kb-item').forEach(function (el) {
+      var hay = el.dataset.search || '';
+      el.style.display = (!q || hay.indexOf(q) !== -1) ? '' : 'none';
+    });
+  });
+})();
+</script>
+{% endblock %}

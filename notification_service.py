@@ -242,6 +242,253 @@ def notify_owner_of_overdue(user, invoice) -> dict:
     return result
 
 
+# ─── Notifiche digest BANDI di finanziamento ─────────────────────────────────
+def _send_bandi_email_digest(user, matches) -> tuple[bool, str]:
+    """Email digest al titolare con i nuovi bandi rilevanti."""
+    from models import AppSettings, UserSetting
+    if not user.email:
+        return False, "Email utente non configurata"
+    cfg = {
+        "host":     AppSettings.get("smtp_host", "smtp.gmail.com"),
+        "port":     int(AppSettings.get("smtp_port", "587")),
+        "user":     AppSettings.get("smtp_user", ""),
+        "password": AppSettings.get("smtp_password", ""),
+        "use_tls":  AppSettings.get("smtp_use_tls", "true") == "true",
+    }
+    if not cfg["user"]:
+        return False, "SMTP globale non configurato"
+
+    company_name = (UserSetting.get(user.id, "company_name")
+                    or AppSettings.get("company_name", "GestFatture"))
+    base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000").rstrip("/")
+    n = len(matches)
+
+    rows_html = ""
+    for m in matches[:10]:
+        b = m.bando
+        deadline = b.deadline.strftime("%d/%m/%Y") if b.deadline else "—"
+        amount = f"€ {b.amount_max:,.0f}".replace(",", ".") if b.amount_max else "—"
+        rows_html += f"""
+          <tr>
+            <td style="padding:10px;border-bottom:1px solid #e5e7eb">
+              <a href="{base_url}/bandi/{b.id}" style="color:#1e3a5f;text-decoration:none;font-weight:bold">{b.title}</a>
+              <div style="font-size:12px;color:#6b7280;margin-top:4px">
+                {b.ente or ''} · {b.region or 'Italia'} · scade {deadline}
+              </div>
+              {f'<div style="font-size:11px;color:#0f766e;margin-top:4px"><em>AI: {m.reason}</em></div>' if m.reason else ''}
+            </td>
+            <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right;vertical-align:top">
+              <div style="background:#16a34a;color:#fff;padding:4px 10px;border-radius:6px;font-weight:bold;display:inline-block">
+                {m.relevance_score}/100
+              </div>
+              <div style="font-size:12px;color:#16a34a;margin-top:6px;font-weight:bold">{amount}</div>
+            </td>
+          </tr>"""
+
+    extra_count = max(0, n - 10)
+    extra_note = (f'<p style="text-align:center;color:#6b7280;font-size:13px;margin-top:8px">'
+                  f'… e altri {extra_count} bandi rilevanti.</p>') if extra_count > 0 else ""
+
+    subject = f"💰 {n} nuovo{'i' if n != 1 else ''} bando{'i' if n != 1 else ''} di finanziamento per te"
+    html = f"""<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"></head><body
+      style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;background:#f8fafc;padding:20px">
+      <div style="max-width:640px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)">
+        <div style="background:#1e3a5f;color:#fff;padding:20px">
+          <h2 style="margin:0">💰 Nuovi bandi rilevanti</h2>
+          <p style="margin:8px 0 0;opacity:.85;font-size:13px">{company_name} · GestFatture</p>
+        </div>
+        <div style="padding:24px">
+          <p>Ciao <strong>{user.username}</strong>,</p>
+          <p>l'AI ha trovato <strong>{n} nuovo{'i' if n != 1 else ''} bando{'i' if n != 1 else ''}</strong>
+          ad alta rilevanza per la tua attività.</p>
+          <table style="width:100%;border-collapse:collapse;margin:16px 0">
+            {rows_html}
+          </table>
+          {extra_note}
+          <p style="text-align:center;margin:24px 0">
+            <a href="{base_url}/bandi"
+               style="background:#1e3a5f;color:#fff;padding:12px 28px;border-radius:6px;
+                      text-decoration:none;font-weight:bold;display:inline-block">
+              Vai a tutti i bandi →
+            </a>
+          </p>
+          <hr style="border:none;border-top:1px solid #e5e7eb;margin:20px 0">
+          <p style="font-size:11px;color:#9ca3af">
+            Notifica automatica generata da GestFatture in base al tuo profilo
+            (codice ATECO, regione, dimensione, descrizione attività). Per non riceverla
+            piu', disattiva 'Notifiche email' nelle Impostazioni.
+          </p>
+        </div>
+      </div>
+    </body></html>"""
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"{company_name} <{cfg['user']}>"
+    msg["To"]      = user.email
+    msg.attach(MIMEText(html, "html", "utf-8"))
+
+    try:
+        from email_service import deliver_email
+        ok, info = deliver_email(
+            msg=msg, subject=subject, recipient=user.email,
+            html=html, plain="",
+            sender_name=company_name, sender_email=cfg["user"],
+        )
+        if ok:
+            return True, f"Email digest bandi inviata [{info}]"
+        return False, info
+    except Exception as e:
+        log.error("Errore email digest bandi: %s", e)
+        return False, str(e)
+
+
+def _send_bandi_whatsapp_digest(user, matches) -> tuple[bool, str]:
+    """WhatsApp digest al titolare con i top 3 bandi rilevanti."""
+    from models import UserSetting, AppSettings
+    phone  = (user.phone or "").strip()
+    apikey = UserSetting.get(user.id, "whatsapp_apikey", "").strip()
+    if not phone or not apikey:
+        return False, "WhatsApp non configurato"
+    phone_clean = phone.lstrip("+").replace(" ", "")
+    base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000").rstrip("/")
+    n = len(matches)
+    top = matches[:3]
+    lines = []
+    for m in top:
+        b = m.bando
+        deadline = f" (scade {b.deadline.strftime('%d/%m')})" if b.deadline else ""
+        amount = f" - fino a €{int(b.amount_max):,}".replace(",", ".") if b.amount_max else ""
+        lines.append(f"⭐ *{b.title[:80]}*{amount}{deadline}\n   {b.ente or ''} · score {m.relevance_score}/100")
+    extra = f"\n\n…e altri {n-3} rilevanti." if n > 3 else ""
+    text = (
+        f"💰 *{n} nuovo{'i' if n != 1 else ''} band{'i' if n != 1 else 'o'} per te*\n\n"
+        + "\n\n".join(lines)
+        + extra
+        + f"\n\n👉 {base_url}/bandi"
+    )
+    try:
+        r = requests.get(
+            "https://api.callmebot.com/whatsapp.php",
+            params={"phone": phone_clean, "text": text, "apikey": apikey},
+            timeout=15,
+        )
+        body_low = r.text.lower()
+        if r.status_code == 200 and ("queued" in body_low or "sent" in body_low or "ok" in body_low):
+            return True, "WhatsApp digest bandi inviato"
+        return False, f"CallMeBot HTTP {r.status_code}: {_clean_callmebot_response(r.text)[:200]}"
+    except Exception as e:
+        log.error("Errore WhatsApp digest bandi: %s", e)
+        return False, str(e)
+
+
+def notify_owner_of_new_bandi(user, db, min_score: int = 75) -> dict:
+    """Trova nuovi match (score >= min_score, notified_at NULL) e manda digest.
+    Ritorna dict con esiti."""
+    from models import BandoMatch, UserSetting, AuditLog
+
+    matches = (BandoMatch.query
+               .filter(BandoMatch.user_id == user.id,
+                       BandoMatch.relevance_score >= min_score,
+                       BandoMatch.notified_at.is_(None),
+                       BandoMatch.is_dismissed.is_not(True))
+               .order_by(BandoMatch.relevance_score.desc())
+               .all())
+    result = {"count": len(matches), "email": None, "whatsapp": None}
+    if not matches:
+        return result
+
+    email_on = UserSetting.get(user.id, "notify_email_enabled") == "true"
+    wa_on    = UserSetting.get(user.id, "notify_whatsapp_enabled") == "true"
+
+    if email_on and user.email:
+        result["email"] = _send_bandi_email_digest(user, matches)
+    if wa_on:
+        result["whatsapp"] = _send_bandi_whatsapp_digest(user, matches)
+
+    sent_any = any(r and r[0] for r in result.values() if isinstance(r, tuple))
+    if sent_any:
+        now = datetime.utcnow()
+        for m in matches:
+            m.notified_at = now
+        db.session.commit()
+
+    # Audit
+    try:
+        details = (f"n={len(matches)}; email="
+                   f"{'OK' if (result['email'] and result['email'][0]) else 'no'}"
+                   f"; wa={'OK' if (result['whatsapp'] and result['whatsapp'][0]) else 'no'}")
+        db.session.add(AuditLog(
+            user_id=user.id, username=user.username,
+            action="bandi_notify_digest", target=f"min_score:{min_score}",
+            details=details[:2000],
+        ))
+        db.session.commit()
+    except Exception:
+        try: db.session.rollback()
+        except Exception: pass
+
+    return result
+
+
+# ─── Survey post-risoluzione ticket ──────────────────────────────────────────
+def send_ticket_survey_email(user, ticket, survey) -> tuple[bool, str]:
+    """Email all'utente con link al survey di soddisfazione (post risoluzione ticket)."""
+    from models import AppSettings, UserSetting
+    from tokens import make_survey_url
+    if not user.email:
+        return False, "Email utente non configurata"
+    cfg = {
+        "host":     AppSettings.get("smtp_host", "smtp.gmail.com"),
+        "port":     int(AppSettings.get("smtp_port", "587")),
+        "user":     AppSettings.get("smtp_user", ""),
+    }
+    if not cfg["user"]:
+        return False, "SMTP non configurato"
+    company = (UserSetting.get(user.id, "company_name")
+               or AppSettings.get("company_name", "GestFatture"))
+    survey_url = make_survey_url(survey)
+    subject = f"⭐ Come è andata? Valuta il ticket #{ticket.id}"
+    html = f"""<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;background:#f8fafc;padding:20px">
+  <div style="max-width:560px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)">
+    <div style="background:#1e3a5f;color:#fff;padding:20px">
+      <h2 style="margin:0">⭐ Come è andata?</h2>
+    </div>
+    <div style="padding:24px">
+      <p>Ciao <strong>{user.username}</strong>,</p>
+      <p>Il ticket <strong>#{ticket.id} — {ticket.subject}</strong> è stato segnato come
+      <strong>risolto</strong>.</p>
+      <p>Aiutaci a migliorare: con un click puoi dirci come è andata.</p>
+      <p style="text-align:center;margin:28px 0">
+        <a href="{survey_url}"
+           style="background:#16a34a;color:#fff;padding:14px 32px;border-radius:6px;
+                  text-decoration:none;font-weight:bold;display:inline-block">
+          Lascia una valutazione →
+        </a>
+      </p>
+      <p style="font-size:11px;color:#9ca3af">Link valido 90 giorni. Se non rispondi, nessun problema.</p>
+    </div>
+  </div>
+</body></html>"""
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = f"{company} <{cfg['user']}>"
+    msg["To"]      = user.email
+    msg.attach(MIMEText(html, "html", "utf-8"))
+    try:
+        from email_service import deliver_email
+        ok, info = deliver_email(
+            msg=msg, subject=subject, recipient=user.email,
+            html=html, plain="",
+            sender_name=company, sender_email=cfg["user"],
+        )
+        return (True, f"Email survey inviata [{info}]") if ok else (False, info)
+    except Exception as e:
+        log.error("Errore email survey: %s", e)
+        return False, str(e)
+
+
 # ─── Notifiche PEC istituzionali ──────────────────────────────────────────────
 def _send_pec_email_to_owner(user, pec_msg) -> tuple[bool, str]:
     """Email al titolare con riassunto PEC istituzionale."""

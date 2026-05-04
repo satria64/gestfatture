@@ -125,6 +125,27 @@
   </div>
 </div>
 
+<!-- Crittografia at-rest secret -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-shield-lock me-1"></i> Crittografia at-rest dei secret
+  </div>
+  <div class="card-body small">
+    Cifra password SMTP, API key Anthropic/Resend/CallMeBot, token OAuth Fatture in Cloud,
+    password PEC ecc. Imposta su Render la env var
+    <code>SECRETS_ENCRYPTION_KEY</code> con una chiave Fernet (genera con
+    <code>python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"</code>),
+    riavvia il servizio, poi click qui sotto per cifrare i secret già salvati.
+    <form action="{{ url_for('admin_secrets_migrate') }}" method="post" class="mt-2 d-inline-block"
+          onsubmit="return confirm('Cifrare tutti i secret esistenti? Idempotente, sicuro da eseguire.')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-sm btn-outline-primary">
+        <i class="bi bi-shield-check me-1"></i> Cifra secret esistenti
+      </button>
+    </form>
+  </div>
+</div>
+
 <!-- Riga 4: bandi -->
 <div class="row g-3 mb-4">
   <div class="col-12">

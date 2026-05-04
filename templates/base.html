@@ -63,6 +63,12 @@
         </a>
       </li>
       <li>
+        <a href="{{ url_for('help_page') }}"
+           class="nav-link text-white {% if request.endpoint == 'help_page' %}active{% endif %}">
+          <i class="bi bi-question-circle me-2"></i> Aiuto
+        </a>
+      </li>
+      <li>
         <a href="{{ url_for('tickets') }}"
            class="nav-link text-white {% if 'ticket' in (request.endpoint or '') %}active{% endif %}">
           <i class="bi bi-life-preserver me-2"></i> Assistenza
@@ -100,6 +106,20 @@
         <a href="{{ url_for('admin_audit_log') }}"
            class="nav-link text-white {% if request.endpoint == 'admin_audit_log' %}active{% endif %}">
           <i class="bi bi-shield-check me-2"></i> Audit Log
+          <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">ADMIN</span>
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('admin_surveys') }}"
+           class="nav-link text-white {% if request.endpoint == 'admin_surveys' %}active{% endif %}">
+          <i class="bi bi-star me-2"></i> Survey
+          <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">ADMIN</span>
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('admin_backups') }}"
+           class="nav-link text-white {% if request.endpoint == 'admin_backups' %}active{% endif %}">
+          <i class="bi bi-cloud-arrow-up me-2"></i> Backup S3
           <span class="badge bg-warning text-dark ms-1" style="font-size:.6rem">ADMIN</span>
         </a>
       </li>

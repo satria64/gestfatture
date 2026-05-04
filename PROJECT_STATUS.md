@@ -188,12 +188,12 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [x] **Dashboard admin con metriche di sistema** (utenti, fatture, attività, errori) → `/admin/metrics`
 - [x] **Resend** come alternativa SMTP (provider configurabile in Impostazioni admin, fallback automatico)
 - [x] **Customer portal pubblico** (`/portal/<token>`, link firmato 1 anno, generabile dalla pagina cliente)
-- [ ] Knowledge base navigabile in /help
-- [ ] Custom domain setup (gestfatture.tuoazienda.it)
-- [ ] Esportazione tickets in CSV/PDF
-- [ ] Survey post-risoluzione ticket
-- [ ] Crittografia at-rest dei secret (Fernet)
-- [ ] Backup S3 settimanali (oltre agli snapshot Render)
+- [x] **Knowledge base** /help — 11 sezioni, 30+ FAQ, ricerca live, indice navigabile
+- [x] **Custom domain** gestfatture.com (Cloudflare DNS + Render Let's Encrypt)
+- [x] **Export tickets** in CSV (nativo) + PDF (reportlab, layout tabellare landscape)
+- [x] **Survey post-risoluzione ticket** — email automatica al cambio status → resolved, link firmato 90gg, stelle 1-5 + commento, dashboard /admin/surveys
+- [x] **Crittografia at-rest dei secret** (Fernet AES-128) — opt-in via env `SECRETS_ENCRYPTION_KEY`, retrocompatibile, bottone "Cifra secret esistenti" in /admin/metrics
+- [x] **Backup S3 settimanali** — lunedì 03:00 in automatico, supporta AWS/Backblaze/R2/Spaces/Minio (qualsiasi S3-compatibile), retention configurabile, dashboard /admin/backups
 
 ### Bug noti / cose da rivedere
 - Email vanno in spam (manca SPF/DKIM/DMARC sul dominio del mittente — risolvibile con Resend)
@@ -238,4 +238,4 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR completato + Resend + Customer portal + Admin metriche + diagnostica notifiche PEC)*
+*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR + Resend + portal + admin metriche + bandi MVP + help + survey ticket + export ticket + crypto at-rest + backup S3)*

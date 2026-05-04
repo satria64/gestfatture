@@ -240,6 +240,70 @@
     </div>
   </div>
 
+  <!-- Backup S3 settimanale (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-cloud-arrow-up me-1"></i> Backup S3 settimanale
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info py-2 small mb-3">
+        Backup automatico ogni <strong>lunedì alle 03:00</strong>: zip del DB SQLite +
+        cartella PDF, caricato su S3 (o S3-compatibile: Backblaze B2, R2, DigitalOcean Spaces, Minio).
+        I backup più vecchi di N giorni vengono cancellati automaticamente.
+        <a href="{{ url_for('admin_backups') }}" class="text-decoration-none">Vai ai backup</a>.
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Backup attivo</label>
+          <select name="backup_s3_enabled" class="form-select">
+            <option value="false" {% if settings.backup_s3_enabled != 'true' %}selected{% endif %}>Disattivato</option>
+            <option value="true"  {% if settings.backup_s3_enabled == 'true' %}selected{% endif %}>Attivato</option>
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Endpoint URL (vuoto per AWS)</label>
+          <input type="url" name="backup_s3_endpoint_url" class="form-control"
+                 value="{{ settings.backup_s3_endpoint_url }}"
+                 placeholder="https://s3.us-west-002.backblazeb2.com">
+          <div class="form-text">Vuoto = AWS S3. B2: <code>https://s3.&lt;region&gt;.backblazeb2.com</code></div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Bucket name</label>
+          <input type="text" name="backup_s3_bucket" class="form-control"
+                 value="{{ settings.backup_s3_bucket }}" placeholder="gestfatture-backups">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Region</label>
+          <input type="text" name="backup_s3_region" class="form-control"
+                 value="{{ settings.backup_s3_region }}" placeholder="eu-west-1">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Access Key ID</label>
+          <input type="text" name="backup_s3_access_key_id" class="form-control font-monospace"
+                 value="{{ settings.backup_s3_access_key_id }}" placeholder="AKIA…">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Secret Access Key</label>
+          <input type="password" name="backup_s3_secret_access_key" class="form-control"
+                 value="{{ settings.backup_s3_secret_access_key }}">
+          <div class="form-text">Lascia vuoto per non modificare.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Prefisso (sub-folder nel bucket)</label>
+          <input type="text" name="backup_s3_prefix" class="form-control"
+                 value="{{ settings.backup_s3_prefix }}" placeholder="gestfatture-backups">
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Retention (giorni)</label>
+          <input type="number" name="backup_s3_retention_days" class="form-control"
+                 value="{{ settings.backup_s3_retention_days or '30' }}" min="1" max="3650">
+          <div class="form-text">I backup più vecchi vengono cancellati.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Dati legali (solo admin) — usati in /privacy e /terms -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">

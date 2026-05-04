@@ -12,8 +12,10 @@ from bs4 import BeautifulSoup
 log = logging.getLogger(__name__)
 
 
-# Sources iniziali — espandibile con un AppSettings dedicato in futuro
+# Sources di partenza — il sistema fa scraping AI di queste pagine ogni notte.
+# Per aggiungerne altre: appendi un dict qui sotto e committa. Niente migrazione DB.
 DEFAULT_SOURCES = [
+    # ── Nazionali ────────────────────────────────────────────────────────────
     {
         "name":   "mimit",
         "label":  "MIMIT — Ministero delle Imprese",
@@ -25,6 +27,44 @@ DEFAULT_SOURCES = [
         "label":  "Invitalia",
         "url":    "https://www.invitalia.it/cosa-facciamo/incentivi-e-strumenti",
         "region": "Italia",
+    },
+    {
+        "name":   "simest",
+        "label":  "SIMEST — Finanziamenti per l'export",
+        "url":    "https://www.simest.it/finanziamenti-agevolati",
+        "region": "Italia",
+    },
+    {
+        "name":   "gse",
+        "label":  "GSE — Incentivi energia rinnovabile",
+        "url":    "https://www.gse.it/servizi-per-te/efficienza-energetica",
+        "region": "Italia",
+    },
+    # ── Camere di Commercio (aggregato) ─────────────────────────────────────
+    {
+        "name":   "unioncamere",
+        "label":  "Unioncamere — Bandi camerali",
+        "url":    "https://www.unioncamere.gov.it/comunicazione/bandi",
+        "region": "Italia",
+    },
+    # ── Regionali (espandibile per regione) ─────────────────────────────────
+    {
+        "name":   "regione_lombardia",
+        "label":  "Regione Lombardia — Bandi imprese",
+        "url":    "https://www.bandi.regione.lombardia.it/servizi/home",
+        "region": "Lombardia",
+    },
+    {
+        "name":   "regione_lazio",
+        "label":  "Lazio Innova — Bandi e incentivi",
+        "url":    "https://www.lazioinnova.it/bandi/",
+        "region": "Lazio",
+    },
+    {
+        "name":   "regione_veneto",
+        "label":  "Regione Veneto — Bandi imprese",
+        "url":    "https://bandi.regione.veneto.it/Public/Elenco?Tipo=1",
+        "region": "Veneto",
     },
 ]
 

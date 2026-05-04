@@ -542,6 +542,14 @@ def create_app():
         )
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # KNOWLEDGE BASE / HELP
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/help")
+    @login_required
+    def help_page():
+        return render_template("help.html")
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # BANDI di finanziamento
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/bandi")
@@ -1438,6 +1446,35 @@ def create_app():
         return render_template("tickets.html", tickets=ts, scope=scope,
                                admin_open_count=admin_open_count)
 
+    @app.route("/tickets/export")
+    @login_required
+    def tickets_export():
+        """Export ticket dell'utente (o tutti se admin con ?all=1) in CSV/PDF."""
+        fmt = (request.args.get("format", "csv") or "csv").lower()
+        if current_user.is_admin and request.args.get("all") == "1":
+            ts = SupportTicket.query.order_by(SupportTicket.created_at.desc()).all()
+            scope_label = "all"
+        else:
+            ts = (SupportTicket.query.filter_by(user_id=current_user.id)
+                  .order_by(SupportTicket.created_at.desc()).all())
+            scope_label = current_user.username
+        from ticket_export import tickets_to_csv, tickets_to_pdf
+        ts_str = date.today().isoformat()
+        if fmt == "pdf":
+            data = tickets_to_pdf(ts, title=f"Ticket assistenza — {scope_label}")
+            return Response(
+                data, mimetype="application/pdf",
+                headers={"Content-Disposition":
+                         f'attachment; filename="tickets_{scope_label}_{ts_str}.pdf"'},
+            )
+        # default CSV
+        body = tickets_to_csv(ts)
+        return Response(
+            body, mimetype="text/csv; charset=utf-8",
+            headers={"Content-Disposition":
+                     f'attachment; filename="tickets_{scope_label}_{ts_str}.csv"'},
+        )
+
     @app.route("/tickets/new", methods=["GET", "POST"])
     @login_required
     def new_ticket():
@@ -1521,13 +1558,79 @@ def create_app():
     @app.route("/tickets/<int:tid>/status", methods=["POST"])
     @admin_required
     def change_ticket_status(tid):
+        from models import TicketSurvey
         t = SupportTicket.query.get_or_404(tid)
         new_status = request.form.get("status")
         if new_status in ("open", "in_progress", "waiting_user", "resolved", "closed"):
+            old_status = t.status
             t.status = new_status
             db.session.commit()
             flash(f"Stato aggiornato a '{t.status_label[0]}'.", "info")
+            # Genera survey + email quando passa a resolved (prima volta)
+            if (new_status == "resolved" and old_status != "resolved"
+                and not TicketSurvey.query.filter_by(ticket_id=t.id).first()):
+                try:
+                    survey = TicketSurvey(ticket_id=t.id)
+                    db.session.add(survey)
+                    db.session.commit()
+                    if t.user and t.user.email:
+                        from notification_service import send_ticket_survey_email
+                        ok, msg = send_ticket_survey_email(t.user, t, survey)
+                        audit("survey_sent", target=f"ticket:{t.id}",
+                              details=f"{'OK' if ok else 'FAIL'}: {msg[:120]}")
+                except Exception as e:
+                    logging.exception("Errore invio survey ticket #%d", t.id)
         return redirect(url_for("ticket_detail", tid=tid))
+
+    # ── Survey post-risoluzione ticket (pubblica via token) ──────────────────
+    @app.route("/survey/<token>", methods=["GET", "POST"])
+    @limiter.limit("30 per hour")
+    def ticket_survey(token):
+        from models import TicketSurvey
+        from tokens import verify_survey_token
+        payload = verify_survey_token(token)
+        if not payload:
+            return render_template("portal_error.html",
+                                   reason="Link survey non valido o scaduto."), 404
+        survey = TicketSurvey.query.get(payload["s"])
+        if not survey or survey.ticket_id != payload["t"]:
+            return render_template("portal_error.html",
+                                   reason="Survey non trovato."), 404
+        if request.method == "POST":
+            if survey.submitted_at:
+                flash("Hai già risposto a questo survey, grazie!", "info")
+                return redirect(url_for("ticket_survey", token=token))
+            try:
+                rating = int(request.form.get("rating", 0))
+            except ValueError:
+                rating = 0
+            if rating < 1 or rating > 5:
+                flash("Scegli una valutazione da 1 a 5 stelle.", "danger")
+                return render_template("survey.html", survey=survey, ticket=survey.ticket)
+            survey.rating = rating
+            survey.comment = (request.form.get("comment", "") or "")[:2000].strip()
+            survey.submitted_at = datetime.utcnow()
+            db.session.commit()
+            return render_template("survey.html", survey=survey, ticket=survey.ticket,
+                                   thank_you=True)
+        return render_template("survey.html", survey=survey, ticket=survey.ticket)
+
+    @app.route("/admin/surveys")
+    @admin_required
+    def admin_surveys():
+        from models import TicketSurvey
+        from sqlalchemy import func as _f
+        surveys = (TicketSurvey.query
+                   .order_by(TicketSurvey.submitted_at.desc().nullslast(),
+                             TicketSurvey.sent_at.desc())
+                   .limit(200).all())
+        # Statistiche
+        completed = [s for s in surveys if s.rating]
+        avg = (sum(s.rating for s in completed) / len(completed)) if completed else 0
+        n_pending = sum(1 for s in surveys if not s.submitted_at)
+        return render_template("admin_surveys.html",
+                               surveys=surveys, avg=avg,
+                               n_completed=len(completed), n_pending=n_pending)
 
     # ── Test Claude API key (verifica che funzioni con 1 chiamata) ───────────
     @app.route("/settings/test-claude", methods=["POST"])
@@ -1696,7 +1799,10 @@ def create_app():
                       "smtp_use_tls", "stripe_webhook_secret", "paypal_webhook_id",
                       "anthropic_api_key", "anthropic_model", "app_external_url",
                       "legal_company", "legal_vat", "legal_address", "legal_contact_email",
-                      "email_provider", "resend_api_key", "resend_from_email"]
+                      "email_provider", "resend_api_key", "resend_from_email",
+                      "backup_s3_enabled", "backup_s3_endpoint_url", "backup_s3_bucket",
+                      "backup_s3_access_key_id", "backup_s3_secret_access_key",
+                      "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -1708,7 +1814,8 @@ def create_app():
                 for k in admin_keys:
                     val = request.form.get(k, "")
                     val = val.strip().strip("\r\n\t ")
-                    if k in ("smtp_password", "resend_api_key") and not val:
+                    if k in ("smtp_password", "resend_api_key",
+                             "backup_s3_secret_access_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
                     if old_val != val:
@@ -2254,6 +2361,53 @@ def create_app():
             bandi_total=bandi_total, bandi_new_7d=bandi_new_7d,
             bandi_last_sync=bandi_last_sync,
         )
+
+    @app.route("/admin/backups")
+    @admin_required
+    def admin_backups():
+        """Lista backup S3 + bottone esegui ora."""
+        from backup_service import list_backups, _get_config
+        cfg = _get_config()
+        items = list_backups(cfg) if cfg["enabled"] and cfg["bucket"] else []
+        return render_template("admin_backups.html", backups=items, cfg=cfg)
+
+    @app.route("/admin/backups/run-now", methods=["POST"])
+    @admin_required
+    def admin_backup_run_now():
+        from backup_service import run_backup
+        result = run_backup(app)
+        if result.get("ok"):
+            kb = result["size_bytes"] // 1024
+            flash(f"✅ Backup eseguito: {result['key']} ({kb} KB). "
+                  f"Vecchi cancellati: {result['cleaned_up']}.", "success")
+            audit("backup_run", target="manual", details=str(result)[:200])
+        elif result.get("skipped"):
+            flash(f"⚠️ {result['reason']}", "warning")
+        else:
+            flash(f"❌ Errore backup: {result.get('error', '?')}", "danger")
+            audit("backup_run", target="manual", details=f"FAIL: {result.get('error', '?')[:200]}")
+        return redirect(url_for("admin_backups"))
+
+    @app.route("/admin/secrets/migrate", methods=["POST"])
+    @admin_required
+    def admin_secrets_migrate():
+        """Cifra tutti i secret esistenti in DB. Idempotente."""
+        from crypto_service import migrate_existing_secrets, is_encryption_enabled
+        if not is_encryption_enabled():
+            flash("⚠️ Imposta prima la env var SECRETS_ENCRYPTION_KEY su Render, poi riavvia.", "warning")
+            return redirect(url_for("admin_metrics"))
+        try:
+            stats = migrate_existing_secrets(db)
+            flash(
+                f"✅ Migrazione completata: {stats.get('app_encrypted', 0)} AppSettings + "
+                f"{stats.get('user_encrypted', 0)} UserSetting cifrati. "
+                f"{stats.get('skipped_already_enc', 0)} erano già cifrati.",
+                "success",
+            )
+            audit("secrets_migrated", details=str(stats))
+        except Exception as e:
+            flash(f"❌ Errore migrazione: {e}", "danger")
+        return redirect(url_for("admin_metrics"))
 
     @app.route("/admin/audit-log")
     @admin_required
