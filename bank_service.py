@@ -123,8 +123,11 @@ def list_user_accounts(user_token: str) -> list[dict]:
 
 def list_transactions(user_token: str, account_id: str,
                       date_from: date | None = None) -> list[dict]:
-    """GET /data/v2/transactions filtrate per account."""
-    qs = f"?accountIdIn={account_id}&pageSize=400"
+    """GET /data/v2/transactions filtrate per account.
+    Tink limita pageSize a 200. Se servono piu' transazioni si itera con
+    nextPageToken — qui ci limitiamo alla prima pagina (sufficiente per
+    sync incrementale di pochi giorni)."""
+    qs = f"?accountIdIn={account_id}&pageSize=200"
     if date_from:
         qs += f"&bookedDateGte={date_from.isoformat()}"
     data = _get_json(f"/data/v2/transactions{qs}", user_token)
