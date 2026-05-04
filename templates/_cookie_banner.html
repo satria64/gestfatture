@@ -1,0 +1,35 @@
+<div id="cookieBanner" style="
+    position:fixed; left:16px; right:16px; bottom:16px; z-index:9999;
+    max-width:640px; margin:0 auto;
+    background:#1e3a5f; color:#fff;
+    padding:14px 18px; border-radius:8px;
+    box-shadow:0 4px 16px rgba(0,0,0,.2);
+    display:none; align-items:center; gap:14px; flex-wrap:wrap;
+    font-size:.875rem;">
+  <div style="flex:1; min-width:240px">
+    🍪 GestFatture utilizza solo
+    <strong>cookie tecnici di sessione</strong> necessari per l'autenticazione
+    e la sicurezza (CSRF). Nessun cookie di tracciamento o profilazione.
+    <a href="{{ url_for('privacy') }}" style="color:#9ec5fe">Maggiori dettagli</a>.
+  </div>
+  <button id="cookieBannerOk" style="
+      background:#fff; color:#1e3a5f; border:0; padding:6px 18px;
+      border-radius:6px; font-weight:600; cursor:pointer; font-size:.875rem;">
+    Ho capito
+  </button>
+</div>
+<script>
+(function () {
+  var b = document.getElementById('cookieBanner');
+  var ok = document.getElementById('cookieBannerOk');
+  if (!b || !ok) return;
+  try {
+    if (localStorage.getItem('gf_cookie_ack') === '1') return;
+  } catch (e) {}
+  b.style.display = 'flex';
+  ok.addEventListener('click', function () {
+    try { localStorage.setItem('gf_cookie_ack', '1'); } catch (e) {}
+    b.style.display = 'none';
+  });
+})();
+</script>

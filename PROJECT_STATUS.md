@@ -80,6 +80,15 @@
 - [x] Session timeout 4h inattività
 - [x] Audit log con UI admin (/admin/audit-log)
 
+### GDPR & Compliance (Step 3 completato)
+- [x] **Export dati GDPR Art. 20** — `/account/export` scarica ZIP con tutti i dati (JSON + PDF allegati). Credenziali di terzi redatte.
+- [x] **Cancellazione account GDPR Art. 17** — `/account/delete` (POST con password + conferma "ELIMINA"). Cancella DB + file su disco. Audit preservato.
+- [x] **Privacy Policy** — `/privacy` (pubblica), valori titolare configurabili in Impostazioni admin.
+- [x] **Termini di servizio** — `/terms` (pubblica).
+- [x] **Cookie banner di trasparenza** — solo cookie tecnici, niente consent module.
+- [x] **2FA TOTP opzionale** — pyotp + QR code, 8 codici di backup single-use, login a 2 step. Toggle dalle Impostazioni.
+- [x] **Sentry** — error tracking opzionale via env var `SENTRY_DSN`. PII spente per GDPR.
+
 ### UX
 - [x] Dashboard con KPI count + KPI EUR
 - [x] Modalità Ospite (`/login/guest`) con cleanup auto al logout
@@ -165,13 +174,11 @@ git add . && git commit -m "..." && git push
 
 ## 📝 Cose ancora da fare (Roadmap)
 
-### Step 3 — Compliance (next)
-- [ ] Privacy policy + Terms of Service
-- [ ] Funzione "esporta tutti i miei dati" (GDPR Art. 20)
-- [ ] Funzione "elimina account + dati" (GDPR Art. 17)
-- [ ] Cookie banner / consent
-- [ ] 2FA opzionale (TOTP via Google Authenticator)
-- [ ] Sentry per error tracking
+### Step 3 — Compliance (✅ completato 2026-05-04)
+Tutto implementato. Per attivare in produzione restano solo configurazioni:
+- Compilare i 4 campi "Dati legali" in Impostazioni admin (ragione sociale, P.IVA, indirizzo, email contatto)
+- Aggiungere `SENTRY_DSN` come env var su Render se si vuole l'error tracking
+- Considerare revisione legale di `templates/privacy.html` e `templates/terms.html` prima della pubblicazione effettiva
 
 ### Nice to have
 - [ ] Dashboard admin con metriche di sistema (utenti totali, fatture totali, ecc.)
@@ -227,4 +234,4 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-04 (security lockdown step 1 + 2 completati)*
+*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR & Compliance completato: export, delete, privacy/terms, cookie banner, 2FA TOTP, Sentry)*

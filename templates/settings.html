@@ -185,6 +185,49 @@
       </div>
     </div>
   </div>
+
+  <!-- Dati legali (solo admin) — usati in /privacy e /terms -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-bank me-1"></i> Dati legali (titolare del trattamento)
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <p class="form-text mb-3">
+        Questi valori compaiono nelle pagine pubbliche
+        <a href="{{ url_for('privacy') }}" target="_blank">Privacy</a> e
+        <a href="{{ url_for('terms') }}" target="_blank">Termini di servizio</a>.
+        Devono identificare l'entità giuridica che eroga il servizio.
+      </p>
+      <div class="row g-3">
+        <div class="col-md-7">
+          <label class="form-label fw-semibold">Ragione sociale / Nome legale</label>
+          <input type="text" name="legal_company" class="form-control"
+                 value="{{ settings.legal_company }}" placeholder="Mario Rossi / Acme Srl">
+        </div>
+        <div class="col-md-5">
+          <label class="form-label fw-semibold">P.IVA / Codice fiscale</label>
+          <input type="text" name="legal_vat" class="form-control"
+                 value="{{ settings.legal_vat }}" placeholder="IT01234567890">
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Sede legale</label>
+          <input type="text" name="legal_address" class="form-control"
+                 value="{{ settings.legal_address }}"
+                 placeholder="Via Roma 1, 20100 Milano">
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Email di contatto privacy</label>
+          <input type="email" name="legal_contact_email" class="form-control"
+                 value="{{ settings.legal_contact_email }}"
+                 placeholder="privacy@tuodominio.it">
+          <div class="form-text">
+            Indirizzo a cui gli utenti possono scrivere per esercitare i diritti GDPR.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
   {% endif %}{# fine blocco admin-only #}
 
   <button type="submit" class="btn btn-primary px-4">
@@ -365,6 +408,182 @@
         Utente corrente: <strong>{{ current_user.username }}</strong>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- 2FA TOTP -->
+<div class="card border-0 shadow-sm mt-4" style="max-width:640px">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-shield-lock me-1"></i> Autenticazione a due fattori (2FA)
+    {% if current_user.totp_enabled %}
+      <span class="badge bg-success ms-2">attiva</span>
+    {% else %}
+      <span class="badge bg-secondary ms-2">non attiva</span>
+    {% endif %}
+  </div>
+  <div class="card-body">
+    {% if current_user.totp_enabled %}
+      <p class="small text-muted mb-3">
+        Stai proteggendo il tuo account con un codice TOTP generato dal tuo telefono.
+        A ogni accesso ti verrà chiesto il codice a 6 cifre.
+      </p>
+
+      {% set remaining = current_user.totp_backup_codes|length and (current_user.totp_backup_codes|from_json|length) or 0 %}
+      <p class="small">
+        Codici di backup rimanenti:
+        <strong class="{{ 'text-danger' if remaining < 3 else 'text-muted' }}">{{ remaining }}</strong>
+        {% if remaining < 3 %}
+          ⚠️ Pochi codici rimasti — rigenerali quanto prima.
+        {% endif %}
+      </p>
+
+      <div class="d-flex gap-2 flex-wrap">
+        <!-- Disattiva 2FA -->
+        <button class="btn btn-outline-danger btn-sm" type="button"
+                data-bs-toggle="collapse" data-bs-target="#disable2faForm">
+          <i class="bi bi-shield-slash me-1"></i> Disattiva 2FA
+        </button>
+        <!-- Rigenera codici -->
+        <button class="btn btn-outline-warning btn-sm" type="button"
+                data-bs-toggle="collapse" data-bs-target="#regen2faForm">
+          <i class="bi bi-arrow-clockwise me-1"></i> Rigenera codici di backup
+        </button>
+      </div>
+
+      <div id="disable2faForm" class="collapse mt-3">
+        <form method="post" action="{{ url_for('settings_2fa_disable') }}" autocomplete="off"
+              class="border rounded p-3 bg-light">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <p class="small fw-semibold mb-2">Per disattivare conferma con password e codice:</p>
+          <div class="row g-2">
+            <div class="col-sm-6">
+              <input type="password" name="password" class="form-control form-control-sm"
+                     placeholder="Password attuale" required autocomplete="current-password">
+            </div>
+            <div class="col-sm-3">
+              <input type="text" name="code" class="form-control form-control-sm font-monospace"
+                     placeholder="000000" pattern="[0-9A-F]{6,8}" required>
+            </div>
+            <div class="col-sm-3 d-grid">
+              <button class="btn btn-danger btn-sm">Disattiva</button>
+            </div>
+          </div>
+          <div class="form-text small">Codice TOTP (6 cifre) o codice di backup (8 caratteri).</div>
+        </form>
+      </div>
+
+      <div id="regen2faForm" class="collapse mt-3">
+        <form method="post" action="{{ url_for('settings_2fa_regenerate') }}" autocomplete="off"
+              class="border rounded p-3 bg-light">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <p class="small fw-semibold mb-2">
+            ⚠️ Rigenerando i codici, quelli vecchi diventano <em>invalidi</em>.
+          </p>
+          <div class="row g-2">
+            <div class="col-sm-6">
+              <input type="password" name="password" class="form-control form-control-sm"
+                     placeholder="Password attuale" required autocomplete="current-password">
+            </div>
+            <div class="col-sm-3">
+              <input type="text" name="code" class="form-control form-control-sm font-monospace"
+                     placeholder="000000" pattern="[0-9]{6}" required>
+            </div>
+            <div class="col-sm-3 d-grid">
+              <button class="btn btn-warning btn-sm">Rigenera</button>
+            </div>
+          </div>
+          <div class="form-text small">Inserisci il codice TOTP attuale (6 cifre).</div>
+        </form>
+      </div>
+    {% else %}
+      <p class="small text-muted mb-3">
+        Aggiungi un secondo fattore al login: anche chi conosce la tua password non potrà
+        accedere senza il codice generato dal tuo telefono.
+      </p>
+      <a href="{{ url_for('settings_2fa_setup') }}" class="btn btn-primary btn-sm">
+        <i class="bi bi-shield-plus me-1"></i> Attiva 2FA
+      </a>
+    {% endif %}
+  </div>
+</div>
+
+<!-- I tuoi dati personali (GDPR) -->
+<div class="card border-0 shadow-sm mt-4" style="max-width:640px">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-shield-check me-1"></i> I tuoi dati personali (GDPR)
+  </div>
+  <div class="card-body">
+    <p class="text-muted small mb-3">
+      In conformità con il GDPR (art. 20 e art. 17) puoi scaricare una copia di tutti i tuoi dati
+      o cancellare definitivamente il tuo account.
+    </p>
+
+    <div class="d-flex flex-column gap-2">
+      <div class="d-flex justify-content-between align-items-center border rounded p-3">
+        <div>
+          <div class="fw-semibold">📥 Esporta i miei dati</div>
+          <small class="text-muted">
+            Scarica un archivio ZIP con profilo, clienti, fatture, solleciti, ticket, PEC e log.
+            Include i PDF allegati. Le credenziali di terzi (PEC, OAuth, API) sono escluse.
+          </small>
+        </div>
+        <a href="{{ url_for('account_export') }}" class="btn btn-outline-primary ms-3">
+          <i class="bi bi-download me-1"></i> Scarica ZIP
+        </a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Zona pericolosa: cancellazione account (GDPR Art. 17) -->
+<div class="card border-danger shadow-sm mt-4 mb-5" style="max-width:640px">
+  <div class="card-header bg-danger text-white fw-semibold">
+    <i class="bi bi-exclamation-triangle me-1"></i> Zona pericolosa — cancella account
+  </div>
+  <div class="card-body">
+    <p class="small mb-2">Questa azione cancella in modo <strong>permanente</strong>:</p>
+    <ul class="small text-muted mb-3">
+      <li>Il tuo profilo (username, email, password)</li>
+      <li>Tutti i tuoi clienti e fatture (e i PDF allegati su disco)</li>
+      <li>I solleciti inviati e in coda</li>
+      <li>I ticket di assistenza che hai aperto</li>
+      <li>Le PEC istituzionali ricevute e analizzate</li>
+      <li>Le tue impostazioni e integrazioni (FiC, PEC, cartella)</li>
+    </ul>
+    <p class="small text-danger fw-semibold mb-3">
+      ⚠️ L'operazione è <u>irreversibile</u>. Prima di procedere ti consigliamo di
+      <a href="{{ url_for('account_export') }}">scaricare un backup dei tuoi dati</a>.
+    </p>
+
+    <button class="btn btn-outline-danger btn-sm" type="button"
+            data-bs-toggle="collapse" data-bs-target="#deleteAccountForm"
+            aria-expanded="false" aria-controls="deleteAccountForm">
+      <i class="bi bi-trash me-1"></i> Voglio cancellare il mio account
+    </button>
+
+    <div id="deleteAccountForm" class="collapse mt-3">
+      <form method="post" action="{{ url_for('account_delete') }}" autocomplete="off">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="mb-2">
+          <label class="form-label small fw-semibold">
+            Conferma con la tua password attuale
+          </label>
+          <input type="password" name="password" class="form-control form-control-sm"
+                 required autocomplete="current-password">
+        </div>
+        <div class="mb-3">
+          <label class="form-label small fw-semibold">
+            Digita <code>ELIMINA</code> in maiuscolo per confermare
+          </label>
+          <input type="text" name="confirmation" class="form-control form-control-sm"
+                 required pattern="ELIMINA" placeholder="ELIMINA" autocomplete="off">
+        </div>
+        <button type="submit" class="btn btn-danger btn-sm"
+                onclick="return confirm('Sei davvero sicuro? Tutti i tuoi dati verranno cancellati per sempre.')">
+          <i class="bi bi-trash me-1"></i> Cancella definitivamente il mio account
+        </button>
+      </form>
+    </div>
   </div>
 </div>
 {% endblock %}

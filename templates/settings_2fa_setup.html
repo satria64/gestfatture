@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Attiva 2FA – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-shield-lock me-2"></i> Attiva l'autenticazione a due fattori</h2>
+  <p class="text-muted small">
+    L'autenticazione a due fattori (2FA) aggiunge un secondo livello di sicurezza al tuo
+    account. Anche chi conosce la tua password non potrà accedere senza il codice generato
+    dal tuo telefono.
+  </p>
+</div>
+
+<div class="card border-0 shadow-sm" style="max-width:720px">
+  <div class="card-body">
+    <h5 class="mb-3">1. Installa un'app authenticator</h5>
+    <p class="small text-muted">
+      Se non ne hai già una, installa una di queste sul telefono:
+    </p>
+    <ul class="small text-muted">
+      <li><strong>Google Authenticator</strong> (Android / iOS)</li>
+      <li><strong>Authy</strong> (Android / iOS / desktop, con backup cloud)</li>
+      <li><strong>Microsoft Authenticator</strong></li>
+      <li><strong>1Password</strong> / <strong>Bitwarden</strong> (se già usi un password manager)</li>
+    </ul>
+
+    <hr class="my-4">
+
+    <h5 class="mb-3">2. Scansiona il QR code</h5>
+    <div class="row align-items-center">
+      <div class="col-md-5 text-center mb-3 mb-md-0">
+        <img src="{{ qr }}" alt="QR code TOTP" style="max-width:240px; border:1px solid #ddd; padding:8px; background:#fff">
+      </div>
+      <div class="col-md-7">
+        <p class="small text-muted">
+          Apri l'app authenticator sul telefono → "Aggiungi account" → "Scansiona QR code".
+          In alternativa puoi inserire manualmente questo segreto:
+        </p>
+        <div class="input-group input-group-sm mb-3">
+          <input type="text" class="form-control font-monospace" value="{{ secret }}" readonly>
+          <button class="btn btn-outline-secondary" type="button"
+                  onclick="navigator.clipboard.writeText('{{ secret }}'); this.innerText='Copiato'">
+            <i class="bi bi-clipboard me-1"></i> Copia
+          </button>
+        </div>
+        <p class="small text-muted mb-0">
+          <i class="bi bi-info-circle me-1"></i>
+          Account: <strong>{{ current_user.username }}</strong> · Issuer: <strong>GestFatture</strong>
+        </p>
+      </div>
+    </div>
+
+    <hr class="my-4">
+
+    <h5 class="mb-3">3. Inserisci il primo codice per confermare</h5>
+    <form method="post" action="{{ url_for('settings_2fa_setup_verify') }}" autocomplete="off">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="row g-2 align-items-end">
+        <div class="col-sm-5">
+          <label class="form-label fw-semibold small">Codice attuale (6 cifre)</label>
+          <input type="text" name="code" class="form-control font-monospace"
+                 inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                 placeholder="000000" required autofocus>
+        </div>
+        <div class="col-sm-7">
+          <button class="btn btn-primary">
+            <i class="bi bi-shield-check me-1"></i> Verifica e attiva 2FA
+          </button>
+          <a href="{{ url_for('settings') }}" class="btn btn-outline-secondary">Annulla</a>
+        </div>
+      </div>
+      <div class="form-text mt-2">
+        Se la verifica fallisce: controlla che l'orologio del telefono sia allineato con
+        l'orario reale (le app TOTP si basano sul tempo).
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="alert alert-warning small mt-3" style="max-width:720px">
+  <i class="bi bi-exclamation-triangle me-1"></i>
+  <strong>Non chiudere questa pagina prima di aver completato la verifica</strong>: dopo la
+  conferma riceverai dei <em>codici di backup</em> da conservare in caso tu perda il telefono.
+</div>
+{% endblock %}

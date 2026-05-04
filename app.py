@@ -131,7 +131,30 @@ def delete_invoice_pdf(filename):
         pass
 
 
+def _init_sentry():
+    """Inizializza Sentry se SENTRY_DSN è settata. PII spente per GDPR."""
+    dsn = os.environ.get("SENTRY_DSN", "").strip()
+    if not dsn:
+        return
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        environment = "production" if (os.environ.get("RENDER") or os.environ.get("PORT")) else "development"
+        sentry_sdk.init(
+            dsn=dsn,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=float(os.environ.get("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+            send_default_pii=False,                # niente IP / cookie / corpi richiesta
+            environment=environment,
+            release=os.environ.get("RENDER_GIT_COMMIT", "")[:12] or None,
+        )
+        logging.info("Sentry inizializzato (env=%s)", environment)
+    except Exception as e:
+        logging.warning("Sentry non inizializzato: %s", e)
+
+
 def create_app():
+    _init_sentry()
     app = Flask(
         __name__,
         template_folder=resource_path("templates"),
@@ -236,6 +259,14 @@ def create_app():
             v = datetime.strptime(v, "%Y-%m-%d").date()
         return v.strftime("%d/%m/%Y")
 
+    @app.template_filter("from_json")
+    def from_json(v):
+        import json as _json
+        try:
+            return _json.loads(v or "[]")
+        except Exception:
+            return []
+
     # ═══════════════════════════════════════════════════════════════════════════
     # AUTH
     # ═══════════════════════════════════════════════════════════════════════════
@@ -249,6 +280,13 @@ def create_app():
             password = request.form.get("password", "")
             user = User.query.filter_by(username=username).first()
             if user and user.check_password(password):
+                if user.totp_enabled:
+                    # 2FA: stato pendente in sessione, l'utente NON è ancora loggato
+                    session["pending_2fa_uid"]      = user.id
+                    session["pending_2fa_remember"] = request.form.get("remember") == "on"
+                    session["pending_2fa_next"]    = request.args.get("next") or ""
+                    audit("login_step1_ok", target=f"user:{username}", user=user)
+                    return redirect(url_for("login_2fa"))
                 login_user(user, remember=request.form.get("remember") == "on")
                 audit("login_success", target=f"user:{username}", user=user)
                 return redirect(request.args.get("next") or url_for("dashboard"))
@@ -256,9 +294,66 @@ def create_app():
             flash("Username o password non corretti.", "danger")
         return render_template("login.html")
 
+    @app.route("/login/2fa", methods=["GET", "POST"])
+    @limiter.limit("10 per minute", methods=["POST"])
+    def login_2fa():
+        """Secondo step di login: verifica codice TOTP o codice di backup."""
+        if current_user.is_authenticated:
+            return redirect(url_for("dashboard"))
+        uid = session.get("pending_2fa_uid")
+        if not uid:
+            return redirect(url_for("login"))
+        user = User.query.get(uid)
+        if not user or not user.totp_enabled:
+            session.pop("pending_2fa_uid", None)
+            return redirect(url_for("login"))
+
+        if request.method == "POST":
+            from totp_service import verify as totp_verify, consume_backup_code
+            code = request.form.get("code", "").strip()
+            ok = totp_verify(user.totp_secret, code)
+            used_backup = False
+            if not ok:
+                ok, new_codes_json = consume_backup_code(user.totp_backup_codes, code)
+                if ok:
+                    used_backup = True
+                    user.totp_backup_codes = new_codes_json
+                    db.session.commit()
+            if not ok:
+                audit("login_2fa_failed", target=f"user:{user.username}", user=user)
+                flash("Codice non valido. Riprova.", "danger")
+                return render_template("login_2fa.html")
+            remember = bool(session.pop("pending_2fa_remember", False))
+            next_url = session.pop("pending_2fa_next", "") or url_for("dashboard")
+            session.pop("pending_2fa_uid", None)
+            login_user(user, remember=remember)
+            audit("login_success", target=f"user:{user.username}", user=user,
+                  details="2FA OK" + (" (backup code)" if used_backup else ""))
+            if used_backup:
+                import json as _json
+                try:
+                    remaining = len(_json.loads(user.totp_backup_codes or "[]"))
+                except Exception:
+                    remaining = 0
+                flash(
+                    f"Hai usato un codice di backup. Codici rimanenti: {remaining}. "
+                    "Se ne hai pochi, rigenerali dalle Impostazioni.",
+                    "warning",
+                )
+            return redirect(next_url)
+        return render_template("login_2fa.html")
+
     def _delete_user_and_all_data(user):
         """Cancella un utente e TUTTI i suoi dati (clienti, fatture, settings, ticket, PEC)."""
         uid = user.id
+        # PDF su disco: raccogli i filename prima di cancellare i record
+        pdf_filenames = [
+            inv.pdf_filename
+            for inv in Invoice.query.filter_by(user_id=uid).all()
+            if inv.pdf_filename
+        ]
+        for fname in pdf_filenames:
+            delete_invoice_pdf(fname)
         # Ticket → cascade ai messaggi
         for t in SupportTicket.query.filter_by(user_id=uid).all():
             db.session.delete(t)
@@ -334,6 +429,190 @@ def create_app():
                 audit("password_change", target=f"user:{current_user.username}")
                 flash("✅ Password aggiornata.", "success")
         return redirect(url_for("settings"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # 2FA TOTP (opzionale, opt-in dalle Impostazioni)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/settings/2fa/setup")
+    @login_required
+    def settings_2fa_setup():
+        if current_user.totp_enabled:
+            flash("2FA è già attiva. Disabilitala prima di re-iscriverti.", "warning")
+            return redirect(url_for("settings"))
+        from totp_service import (generate_secret, provisioning_uri, qr_data_uri)
+        secret = generate_secret()
+        current_user.totp_secret = secret  # candidato, non ancora attivato
+        current_user.totp_enabled = False
+        db.session.commit()
+        uri = provisioning_uri(secret, current_user.username)
+        return render_template("settings_2fa_setup.html",
+                               secret=secret, qr=qr_data_uri(uri))
+
+    @app.route("/settings/2fa/setup/verify", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per minute")
+    def settings_2fa_setup_verify():
+        from totp_service import (verify as totp_verify,
+                                  generate_backup_codes, hash_codes_json)
+        code = request.form.get("code", "").strip()
+        if not totp_verify(current_user.totp_secret, code):
+            audit("2fa_setup_failed", target=f"user:{current_user.username}",
+                  details="codice di verifica iniziale errato")
+            flash("Codice non valido. Verifica l'orologio del telefono e riprova.", "danger")
+            return redirect(url_for("settings_2fa_setup"))
+        current_user.totp_enabled = True
+        plain = generate_backup_codes()
+        current_user.totp_backup_codes = hash_codes_json(plain)
+        db.session.commit()
+        audit("2fa_enabled", target=f"user:{current_user.username}")
+        return render_template("settings_2fa_codes.html", backup_codes=plain)
+
+    @app.route("/settings/2fa/disable", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per minute")
+    def settings_2fa_disable():
+        from totp_service import (verify as totp_verify, consume_backup_code)
+        password = request.form.get("password", "")
+        code     = request.form.get("code", "").strip()
+        if not current_user.check_password(password):
+            audit("2fa_disable_failed", target=f"user:{current_user.username}",
+                  details="password errata")
+            flash("Password non corretta.", "danger")
+            return redirect(url_for("settings"))
+        ok = totp_verify(current_user.totp_secret, code)
+        if not ok:
+            ok, _ = consume_backup_code(current_user.totp_backup_codes, code)
+        if not ok:
+            audit("2fa_disable_failed", target=f"user:{current_user.username}",
+                  details="codice errato")
+            flash("Codice non valido.", "danger")
+            return redirect(url_for("settings"))
+        current_user.totp_secret = ""
+        current_user.totp_enabled = False
+        current_user.totp_backup_codes = ""
+        db.session.commit()
+        audit("2fa_disabled", target=f"user:{current_user.username}")
+        flash("✅ 2FA disattivata.", "success")
+        return redirect(url_for("settings"))
+
+    @app.route("/settings/2fa/regenerate-codes", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per minute")
+    def settings_2fa_regenerate():
+        """Rigenera i codici di backup (richiede password e codice TOTP attuale)."""
+        from totp_service import (verify as totp_verify,
+                                  generate_backup_codes, hash_codes_json)
+        if not current_user.totp_enabled:
+            flash("2FA non attiva.", "warning")
+            return redirect(url_for("settings"))
+        password = request.form.get("password", "")
+        code     = request.form.get("code", "").strip()
+        if not current_user.check_password(password):
+            flash("Password non corretta.", "danger")
+            return redirect(url_for("settings"))
+        if not totp_verify(current_user.totp_secret, code):
+            flash("Codice TOTP non valido.", "danger")
+            return redirect(url_for("settings"))
+        plain = generate_backup_codes()
+        current_user.totp_backup_codes = hash_codes_json(plain)
+        db.session.commit()
+        audit("2fa_codes_regenerated", target=f"user:{current_user.username}")
+        return render_template("settings_2fa_codes.html",
+                               backup_codes=plain, regenerated=True)
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # GDPR — diritti dell'utente sui propri dati
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/account/export")
+    @login_required
+    @limiter.limit("3 per hour")
+    def account_export():
+        """GDPR Art. 20 — esporta tutti i dati personali in un archivio ZIP."""
+        from gdpr_service import build_export_zip
+        user = current_user._get_current_object()
+        # Registriamo prima l'azione: così l'evento appare anche dentro l'archivio
+        audit("data_export", target=f"user:{user.username}")
+        buf = build_export_zip(user, upload_folder=get_upload_folder())
+        fname = f"gestfatture_export_{user.username}_{date.today().isoformat()}.zip"
+        return Response(
+            buf.getvalue(),
+            mimetype="application/zip",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
+
+    # ── Pagine legali pubbliche (privacy + termini) ──────────────────────────
+    def _legal_context():
+        keys = ("legal_company", "legal_vat", "legal_address", "legal_contact_email")
+        ctx = {k: AppSettings.get(k, "") for k in keys}
+        # Fallback al company_name globale se l'admin non ha specificato un'entità legale separata
+        if not ctx["legal_company"]:
+            ctx["legal_company"] = AppSettings.get("company_name", "")
+        ctx["legal_complete"] = all(ctx[k] for k in keys)
+        ctx["updated_at"] = "4 maggio 2026"
+        return ctx
+
+    @app.route("/privacy")
+    def privacy():
+        return render_template("privacy.html", **_legal_context())
+
+    @app.route("/terms")
+    def terms():
+        return render_template("terms.html", **_legal_context())
+
+    @app.route("/account/delete", methods=["POST"])
+    @login_required
+    @limiter.limit("3 per hour")
+    def account_delete():
+        """GDPR Art. 17 — cancella permanentemente l'account e tutti i dati."""
+        password     = request.form.get("password", "")
+        confirmation = request.form.get("confirmation", "").strip()
+
+        if confirmation != "ELIMINA":
+            flash("Per confermare devi digitare ELIMINA in maiuscolo.", "danger")
+            return redirect(url_for("settings"))
+
+        if not current_user.check_password(password):
+            audit("account_delete_failed",
+                  target=f"user:{current_user.username}",
+                  details="password errata")
+            flash("Password non corretta. Cancellazione annullata.", "danger")
+            return redirect(url_for("settings"))
+
+        # Protezione: l'unico amministratore non può eliminarsi (lock-out)
+        if current_user.is_admin:
+            other_admins = (
+                User.query.filter(User.id != current_user.id, User.is_admin.is_(True)).count()
+            )
+            if other_admins == 0:
+                flash(
+                    "Sei l'unico amministratore: non puoi cancellare l'account. "
+                    "Promuovi prima un altro utente come admin.",
+                    "danger",
+                )
+                return redirect(url_for("settings"))
+
+        user = current_user._get_current_object()
+        username = user.username
+
+        # Audit PRIMA della cancellazione (la riga rimane nel log anche dopo)
+        audit("account_deleted", target=f"user:{username}",
+              details="cancellazione su richiesta utente (GDPR Art. 17)")
+
+        logout_user()
+        try:
+            _delete_user_and_all_data(user)
+            flash(
+                "✅ Account e tutti i tuoi dati sono stati cancellati definitivamente. "
+                "Grazie per aver usato GestFatture.",
+                "success",
+            )
+        except Exception as e:
+            logging.exception("Errore cancellazione account: %s", e)
+            flash(
+                "⚠️ Errore durante la cancellazione. Contatta l'assistenza.",
+                "danger",
+            )
+        return redirect(url_for("login"))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # DASHBOARD
@@ -1241,7 +1520,8 @@ def create_app():
         # Chiavi GLOBALI riservate all'amministratore (AppSettings)
         admin_keys = ["smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "smtp_use_tls", "stripe_webhook_secret", "paypal_webhook_id",
-                      "anthropic_api_key", "anthropic_model", "app_external_url"]
+                      "anthropic_api_key", "anthropic_model", "app_external_url",
+                      "legal_company", "legal_vat", "legal_address", "legal_contact_email"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -1706,6 +1986,18 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE users ADD COLUMN phone TEXT DEFAULT ''"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna users.phone")
+            if "totp_secret" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.totp_secret")
+            if "totp_enabled" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_enabled INTEGER DEFAULT 0"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.totp_enabled")
+            if "totp_backup_codes" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.totp_backup_codes")
 
         # ── Multi-tenant: user_id su clients e invoices ──────────────────────
         admin_id_row = conn.execute(text("SELECT MIN(id) FROM users WHERE is_admin = 1")).fetchone()

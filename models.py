@@ -29,6 +29,10 @@ class User(db.Model, UserMixin):
     email         = db.Column(db.String(200), default="")     # per notifiche al titolare
     phone         = db.Column(db.String(50),  default="")     # numero WhatsApp (con prefisso +39…)
     created_at    = db.Column(db.DateTime, default=datetime.utcnow)
+    # 2FA TOTP (opzionale, opt-in)
+    totp_secret        = db.Column(db.String(64),  default="")  # base32, vuoto se non configurato
+    totp_enabled       = db.Column(db.Boolean,    default=False, nullable=False)
+    totp_backup_codes  = db.Column(db.Text,       default="")   # JSON list di hash SHA-256 single-use
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
@@ -268,6 +272,16 @@ class AuditLog(db.Model):
             "ticket_status":     ("Stato ticket",        "info"),
             "clients_merged":    ("Clienti unificati",   "warning"),
             "test_claude":       ("Test Claude API",     "info"),
+            "data_export":       ("Export dati GDPR",    "primary"),
+            "account_deleted":   ("Account cancellato",  "danger"),
+            "account_delete_failed": ("Cancellazione fallita", "warning"),
+            "login_step1_ok":    ("Login step 1 OK",     "info"),
+            "login_2fa_failed":  ("2FA fallita",         "danger"),
+            "2fa_enabled":       ("2FA attivata",        "success"),
+            "2fa_disabled":      ("2FA disattivata",     "warning"),
+            "2fa_setup_failed":  ("2FA setup fallita",   "warning"),
+            "2fa_disable_failed": ("2FA disable fallita", "warning"),
+            "2fa_codes_regenerated": ("2FA codici rigenerati", "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 

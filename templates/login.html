@@ -74,6 +74,12 @@
         </p>
       </div>
     </div>
+    <p class="text-center small text-muted mt-3 mb-0">
+      <a href="{{ url_for('privacy') }}" class="text-muted">Privacy</a>
+      ·
+      <a href="{{ url_for('terms') }}" class="text-muted">Termini di servizio</a>
+    </p>
   </div>
+  {% include '_cookie_banner.html' %}
 </body>
 </html>

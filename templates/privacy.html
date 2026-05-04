@@ -1,0 +1,119 @@
+{% extends "legal_base.html" %}
+{% block title %}Privacy Policy – GestFatture{% endblock %}
+{% block subtitle %}Privacy Policy{% endblock %}
+{% block content %}
+
+<h1>Informativa sulla Privacy</h1>
+<p class="text-muted small">
+  Ultimo aggiornamento: <strong>{{ updated_at }}</strong> ·
+  Conforme al Regolamento (UE) 2016/679 (GDPR)
+</p>
+
+{% if not legal_complete %}
+<div class="alert alert-warning small mt-3">
+  ⚠️ <strong>Modello in configurazione</strong>: alcuni dati del titolare non sono ancora stati
+  inseriti dall'amministratore. Prima della pubblicazione effettiva è consigliata una revisione
+  da parte di un legale.
+</div>
+{% endif %}
+
+<h2>1. Titolare del trattamento</h2>
+<p>
+  Il titolare del trattamento dei dati personali è
+  <strong>{{ legal_company or "[nome azienda da configurare]" }}</strong>,
+  P.IVA {{ legal_vat or "[da configurare]" }},
+  con sede in {{ legal_address or "[indirizzo da configurare]" }}.
+  Per qualsiasi questione relativa alla privacy puoi scrivere a
+  <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email or "[email da configurare]" }}</a>.
+</p>
+
+<h2>2. Quali dati raccogliamo</h2>
+<p>Quando usi GestFatture trattiamo le seguenti categorie di dati:</p>
+<ul>
+  <li><strong>Dati di account</strong>: username, email, numero di telefono (per WhatsApp), password (memorizzata in forma irreversibile tramite hashing).</li>
+  <li><strong>Dati commerciali</strong>: anagrafica clienti (nome, P.IVA, indirizzo, email, PEC, telefono), fatture emesse e ricevute, importi, scadenze, stato dei pagamenti, allegati PDF.</li>
+  <li><strong>Comunicazioni di servizio</strong>: ticket di assistenza e relativi messaggi.</li>
+  <li><strong>Email PEC istituzionali</strong>: messaggi ricevuti da AdE/INPS/INAIL e relativi metadati e allegati, se attivi l'integrazione.</li>
+  <li><strong>Credenziali integrazioni</strong>: token OAuth (Fatture in Cloud), credenziali IMAP della tua casella PEC, API key WhatsApp/CallMeBot — tutti memorizzati nel database e usati solo per le funzionalità che hai attivato.</li>
+  <li><strong>Dati tecnici</strong>: indirizzo IP, user-agent del browser, timestamp delle azioni, registrati nel log di sicurezza dell'applicazione.</li>
+</ul>
+
+<h2>3. Finalità e basi giuridiche</h2>
+<p>I dati sono trattati per le seguenti finalità:</p>
+<ul>
+  <li><strong>Erogazione del servizio</strong> (art. 6.1.b GDPR — esecuzione del contratto): gestione fatture, invio solleciti, integrazioni con terze parti, supporto utente.</li>
+  <li><strong>Sicurezza dell'applicazione</strong> (art. 6.1.f — legittimo interesse): log di accessi, audit delle azioni sensibili, prevenzione abusi.</li>
+  <li><strong>Adempimenti di legge</strong> (art. 6.1.c): conservazione dei dati fiscali secondo i termini previsti dalla normativa italiana.</li>
+</ul>
+
+<h2>4. Conservazione dei dati</h2>
+<ul>
+  <li><strong>Dati di account e commerciali</strong>: per tutta la durata del rapporto, e successivamente per il tempo richiesto dalla normativa fiscale italiana (di norma 10 anni).</li>
+  <li><strong>Log di sicurezza (audit log)</strong>: 12 mesi.</li>
+  <li><strong>Backup automatici</strong>: snapshot giornalieri, conservati per 7 giorni.</li>
+  <li><strong>Account ospite</strong>: cancellato automaticamente al logout o alla chiusura della sessione.</li>
+</ul>
+
+<h2>5. Soggetti terzi (responsabili del trattamento)</h2>
+<p>Per fornire il servizio condividiamo alcuni dati con i seguenti fornitori, designati come responsabili esterni del trattamento ai sensi dell'art. 28 GDPR:</p>
+<ul>
+  <li><strong>Render.com</strong> — hosting dell'applicazione e dei dati (server in UE, dati trasferiti negli USA tramite Standard Contractual Clauses).</li>
+  <li><strong>Anthropic, PBC</strong> — analisi via Claude API delle PEC istituzionali e chat di assistenza (server USA, base giuridica: SCC).</li>
+  <li><strong>Provider SMTP</strong> (Gmail/Resend) — invio dei solleciti email ai tuoi clienti.</li>
+  <li><strong>Stripe Inc. / PayPal</strong> — solo i metadati delle notifiche di pagamento (webhook), nessun dato di carta di credito è gestito da GestFatture.</li>
+  <li><strong>Fatture in Cloud (TeamSystem)</strong> — solo se attivi l'integrazione, riceviamo i dati delle tue fatture tramite API.</li>
+  <li><strong>CallMeBot</strong> — invio notifiche WhatsApp al titolare (solo numero di telefono e testo del messaggio).</li>
+</ul>
+
+<h2>6. Trasferimenti extra-UE</h2>
+<p>
+  I trasferimenti verso fornitori con sede negli Stati Uniti (Anthropic, Render, Stripe, PayPal)
+  avvengono sulla base delle <em>Standard Contractual Clauses</em> approvate dalla Commissione
+  Europea, che garantiscono un livello di protezione adeguato.
+</p>
+
+<h2>7. I tuoi diritti</h2>
+<p>Ai sensi degli articoli 15–22 del GDPR, hai il diritto di:</p>
+<ul>
+  <li><strong>Accesso</strong> (art. 15): conoscere quali dati personali trattiamo.</li>
+  <li><strong>Rettifica</strong> (art. 16): correggere dati inesatti o incompleti.</li>
+  <li><strong>Cancellazione</strong> (art. 17, "diritto all'oblio"): chiedere la cancellazione dei dati.</li>
+  <li><strong>Limitazione del trattamento</strong> (art. 18).</li>
+  <li><strong>Portabilità</strong> (art. 20): ricevere i tuoi dati in formato strutturato e leggibile da un computer.</li>
+  <li><strong>Opposizione</strong> (art. 21).</li>
+  <li><strong>Reclamo</strong> al <a href="https://www.garanteprivacy.it" target="_blank" rel="noopener">Garante per la Protezione dei Dati Personali</a>.</li>
+</ul>
+<p>
+  Per esercitare i diritti di accesso, portabilità e cancellazione direttamente, vai su
+  <strong>Impostazioni → I tuoi dati personali</strong> dentro l'app:
+  troverai un download in ZIP di tutti i tuoi dati e un pulsante per cancellare l'account.
+  Per gli altri diritti puoi scriverci all'indirizzo indicato sopra.
+</p>
+
+<h2>8. Cookie</h2>
+<p>
+  GestFatture utilizza esclusivamente <strong>cookie tecnici di sessione</strong>, necessari per
+  mantenere l'utente autenticato e per la protezione contro attacchi CSRF. Non utilizziamo cookie
+  di profilazione, di tracciamento o di terze parti pubblicitarie.
+</p>
+
+<h2>9. Sicurezza</h2>
+<p>Adottiamo misure tecniche e organizzative ragionevoli per proteggere i tuoi dati:</p>
+<ul>
+  <li>Connessioni cifrate (HTTPS / TLS) tra il tuo browser e i nostri server.</li>
+  <li>Password memorizzate solo come hash crittografico (mai in chiaro).</li>
+  <li>Cookie di sessione con flag <code>HttpOnly</code>, <code>Secure</code>, <code>SameSite</code>.</li>
+  <li>Protezione anti-CSRF su tutte le operazioni di modifica.</li>
+  <li>Rate limiting sugli endpoint sensibili.</li>
+  <li>Audit log delle azioni sensibili.</li>
+  <li>Backup automatici giornalieri.</li>
+</ul>
+
+<h2>10. Modifiche alla policy</h2>
+<p>
+  Possiamo aggiornare questa informativa per riflettere modifiche normative o del servizio.
+  In caso di modifiche sostanziali ti avviseremo via email o tramite avviso nell'app.
+  La versione più aggiornata è sempre disponibile a questa pagina.
+</p>
+
+{% endblock %}

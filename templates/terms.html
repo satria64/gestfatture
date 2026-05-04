@@ -1,0 +1,123 @@
+{% extends "legal_base.html" %}
+{% block title %}Termini di servizio – GestFatture{% endblock %}
+{% block subtitle %}Termini di servizio{% endblock %}
+{% block content %}
+
+<h1>Termini di servizio</h1>
+<p class="text-muted small">
+  Ultimo aggiornamento: <strong>{{ updated_at }}</strong>
+</p>
+
+{% if not legal_complete %}
+<div class="alert alert-warning small mt-3">
+  ⚠️ <strong>Modello in configurazione</strong>: alcuni dati non sono ancora stati inseriti
+  dall'amministratore. Prima della pubblicazione effettiva è consigliata una revisione legale.
+</div>
+{% endif %}
+
+<h2>1. Oggetto</h2>
+<p>
+  Le presenti condizioni regolano l'uso del servizio <strong>GestFatture</strong> (di seguito "il
+  Servizio") fornito da <strong>{{ legal_company or "[nome azienda]" }}</strong>
+  (di seguito "il Fornitore"). Utilizzando il Servizio accetti integralmente questi termini.
+</p>
+
+<h2>2. Descrizione del servizio</h2>
+<p>
+  GestFatture è un'applicazione web SaaS per la gestione di fatture, solleciti automatici e
+  contabilità clienti, rivolta a professionisti e piccole imprese italiane. Le funzionalità
+  comprendono, fra l'altro:
+</p>
+<ul>
+  <li>Anagrafica clienti e fatture, importazione da CSV/Excel/PDF/XML.</li>
+  <li>Invio automatico di solleciti via email.</li>
+  <li>Notifiche al titolare via email e WhatsApp.</li>
+  <li>Integrazioni opzionali (Fatture in Cloud, PEC IMAP, cartella locale).</li>
+  <li>Analisi AI delle PEC istituzionali e chat di assistenza.</li>
+</ul>
+
+<h2>3. Account e credenziali</h2>
+<ul>
+  <li>L'account è creato dall'amministratore del Servizio o tramite la modalità ospite.</li>
+  <li>L'utente è responsabile della sicurezza delle proprie credenziali e di ogni attività compiuta dal proprio account.</li>
+  <li>L'utente deve segnalare tempestivamente al Fornitore qualsiasi accesso non autorizzato.</li>
+  <li>Le password devono rispettare i requisiti minimi di sicurezza imposti dall'applicazione.</li>
+</ul>
+
+<h2>4. Uso ammesso</h2>
+<p>L'utente si impegna a utilizzare il Servizio in modo lecito. È vietato in particolare:</p>
+<ul>
+  <li>Inviare comunicazioni non sollecitate (spam) o contenuti illeciti tramite il sistema di solleciti.</li>
+  <li>Tentare di accedere a dati di altri utenti, alterare il funzionamento del Servizio o aggirarne le misure di sicurezza.</li>
+  <li>Effettuare reverse engineering, decompilazione o reso del codice sorgente, salvo nei limiti consentiti dalla legge.</li>
+  <li>Usare il Servizio per scopi non conformi alla normativa applicabile (incluse le norme fiscali italiane e il GDPR).</li>
+</ul>
+
+<h2>5. Dati dell'utente</h2>
+<ul>
+  <li>L'utente resta proprietario dei dati che inserisce nel Servizio (clienti, fatture, allegati).</li>
+  <li>L'utente è responsabile della correttezza, completezza e liceità dei dati inseriti.</li>
+  <li>L'utente è il titolare del trattamento dei dati dei propri clienti; il Fornitore agisce come responsabile esterno (art. 28 GDPR) per il trattamento svolto nell'ambito del Servizio.</li>
+  <li>L'utente può esportare in qualsiasi momento i propri dati in formato ZIP/JSON dalle Impostazioni.</li>
+</ul>
+
+<h2>6. Disponibilità del servizio</h2>
+<p>
+  Il Fornitore si impegna a mantenere il Servizio disponibile con una buona qualità, ma <em>non
+  garantisce</em> un livello specifico di disponibilità (SLA). Sono ammesse interruzioni
+  programmate per manutenzione e fermi imprevisti dovuti a eventi di forza maggiore o a
+  malfunzionamenti dei fornitori terzi (hosting, API).
+</p>
+
+<h2>7. Backup e perdita dati</h2>
+<p>
+  Il Fornitore effettua backup automatici giornalieri conservati per 7 giorni. L'utente è
+  comunque tenuto a conservare copie autonome dei propri dati (è disponibile l'export ZIP
+  in qualsiasi momento). Il Fornitore non risponde di perdite di dati causate da eventi al di
+  fuori del suo controllo.
+</p>
+
+<h2>8. Costi e fatturazione</h2>
+<p>
+  Le condizioni economiche del Servizio (gratuito, freemium o a pagamento) sono comunicate
+  all'utente al momento dell'attivazione dell'account. Eventuali aggiornamenti dei prezzi
+  saranno notificati con almeno 30 giorni di preavviso.
+</p>
+
+<h2>9. Limitazione di responsabilità</h2>
+<p>
+  Il Servizio è fornito "così com'è". Nei limiti consentiti dalla legge, il Fornitore non
+  risponde di danni indiretti, perdita di profitti, perdita di clientela o di dati. La
+  responsabilità complessiva del Fornitore, per qualsiasi causa, è limitata ai corrispettivi
+  pagati dall'utente nei 12 mesi precedenti l'evento dannoso.
+</p>
+
+<h2>10. Recesso e cancellazione</h2>
+<ul>
+  <li>L'utente può cancellare in qualsiasi momento il proprio account dalla pagina Impostazioni dell'app, con effetto immediato.</li>
+  <li>La cancellazione comporta l'eliminazione definitiva di tutti i dati personali e commerciali, salvo quanto richiesto da norme di legge (es. obblighi fiscali).</li>
+  <li>Il Fornitore può sospendere o chiudere account in caso di violazione gravi dei presenti termini, con preavviso ragionevole salvo casi di urgenza.</li>
+</ul>
+
+<h2>11. Modifiche ai termini</h2>
+<p>
+  Il Fornitore può aggiornare i presenti termini per riflettere modifiche normative o del
+  Servizio. Le modifiche sostanziali saranno comunicate via email o tramite avviso nell'app
+  con un preavviso ragionevole. La prosecuzione dell'uso del Servizio dopo la notifica
+  costituisce accettazione delle modifiche.
+</p>
+
+<h2>12. Legge applicabile e foro competente</h2>
+<p>
+  I presenti termini sono regolati dalla legge italiana. Per ogni controversia è competente
+  in via esclusiva il foro di {{ legal_address.split(',')[-1].strip() if legal_address else "[città del titolare]" }},
+  fatte salve le disposizioni di legge inderogabili a tutela del consumatore.
+</p>
+
+<h2>13. Contatti</h2>
+<p>
+  Per domande relative ai presenti termini puoi scrivere a
+  <a href="mailto:{{ legal_contact_email }}">{{ legal_contact_email or "[email da configurare]" }}</a>.
+</p>
+
+{% endblock %}
