@@ -570,83 +570,92 @@ def create_app():
     @login_required
     @limiter.limit("10 per hour")
     def bank_connect():
-        """Mostra lista banche italiane (GET) o avvia OAuth flow (POST)."""
-        from bank_service import list_italian_banks, create_connection
-        if request.method == "POST":
-            institution_id = request.form.get("institution_id", "").strip()
-            if not institution_id:
-                flash("Scegli una banca dalla lista.", "warning")
-                return redirect(url_for("bank_connect"))
-            try:
-                base_url = AppSettings.get("app_external_url", "").rstrip("/") \
-                           or request.host_url.rstrip("/")
-                redirect_url = f"{base_url}/my-integrations/bank/callback"
-                conn = create_connection(current_user.id, institution_id, redirect_url)
-                # Salva requisition_id in sessione per il callback
-                session["bank_pending_requisition"] = conn["id"]
-                session["bank_pending_institution"] = institution_id
-                audit("bank_connect_start", target=f"institution:{institution_id}")
-                return redirect(conn["link"])
-            except Exception as e:
-                logging.exception("Errore avvio bank connect")
-                flash(f"❌ Errore: {e}", "danger")
-                return redirect(url_for("bank_connect"))
-        # GET: mostra lista banche
+        """Avvia il flow Tink Link: redirect a Tink per scegliere la banca."""
+        from bank_service import build_link_url
+        import secrets as _secrets
         try:
-            banks = list_italian_banks()
+            base_url = AppSettings.get("app_external_url", "").rstrip("/") \
+                       or request.host_url.rstrip("/")
+            redirect_url = f"{base_url}/my-integrations/bank/callback"
+            state = _secrets.token_urlsafe(24)
+            session["bank_link_state"] = state
+            url = build_link_url(redirect_url, state, market="IT", locale="it_IT")
+            audit("bank_connect_start", target="tink", details=f"state:{state[:10]}")
+            return redirect(url)
         except Exception as e:
-            flash(f"⚠️ Impossibile caricare lista banche: {e}", "danger")
-            banks = []
-        return render_template("bank_connect.html", banks=banks)
+            logging.exception("Errore avvio Tink Link")
+            flash(f"❌ Errore: {e}", "danger")
+            return redirect(url_for("bank_overview"))
 
     @app.route("/my-integrations/bank/callback")
     @login_required
     def bank_callback():
-        """Callback dopo OAuth GoCardless. La requisition_id è in sessione."""
-        from bank_service import fetch_requisition_accounts, fetch_account_details
-        req_id = session.pop("bank_pending_requisition", None)
-        institution_id = session.pop("bank_pending_institution", "")
-        if not req_id:
-            flash("Sessione scaduta. Riprova a collegare la banca.", "warning")
+        """Callback Tink Link: ?code=...&state=... → exchange + fetch accounts."""
+        from bank_service import (exchange_code, list_user_accounts)
+        code = request.args.get("code", "").strip()
+        state = request.args.get("state", "").strip()
+        expected_state = session.pop("bank_link_state", None)
+        error = request.args.get("error", "")
+
+        if error:
+            flash(f"❌ Connessione annullata: {error}", "warning")
             return redirect(url_for("bank_overview"))
+        if not code:
+            flash("Sessione scaduta o code mancante.", "warning")
+            return redirect(url_for("bank_overview"))
+        if not expected_state or state != expected_state:
+            flash("State CSRF non valido. Riprova.", "danger")
+            audit("bank_connect_failed", details="state mismatch")
+            return redirect(url_for("bank_overview"))
+
         try:
-            req = fetch_requisition_accounts(req_id)
-            account_ids = req.get("accounts", []) or []
-            inst_name = req.get("institution_id", institution_id)
+            base_url = AppSettings.get("app_external_url", "").rstrip("/") \
+                       or request.host_url.rstrip("/")
+            redirect_url = f"{base_url}/my-integrations/bank/callback"
+            tok_data = exchange_code(code, redirect_url)
+            access_token  = tok_data["access_token"]
+            refresh_token = tok_data.get("refresh_token", "")
+            expires_in    = int(tok_data.get("expires_in", 3600))
+            token_exp     = datetime.utcnow() + timedelta(seconds=expires_in)
+            access_exp    = datetime.utcnow() + timedelta(days=90)
+
+            accounts = list_user_accounts(access_token)
             saved = 0
-            for acc_id in account_ids:
-                # Skip se già collegato
+            for acc in accounts:
+                ext_id = acc.get("id", "")
+                if not ext_id:
+                    continue
                 if BankAccount.query.filter_by(
-                    user_id=current_user.id, external_account_id=acc_id
+                    user_id=current_user.id, external_account_id=ext_id
                 ).first():
                     continue
-                try:
-                    details = fetch_account_details(acc_id).get("account", {})
-                except Exception:
-                    details = {}
-                expires_at = datetime.utcnow() + timedelta(days=90)
+                identifiers = acc.get("identifiers", {}) or {}
+                iban = ((identifiers.get("iban", {}) or {}).get("iban") or "")
+                fin = acc.get("financialInstitutionId", "") or ""
+                name = acc.get("name", "") or acc.get("type", "")
                 ba = BankAccount(
                     user_id=current_user.id,
-                    requisition_id=req_id,
-                    external_account_id=acc_id,
-                    iban=(details.get("iban") or "")[:40],
-                    institution_id=inst_name[:80],
-                    institution_name=inst_name[:120],
-                    owner_name=(details.get("ownerName") or "")[:200],
-                    name=(details.get("name") or details.get("displayName") or "")[:200],
-                    currency=details.get("currency", "EUR"),
+                    requisition_id="",  # non usato con Tink
+                    external_account_id=ext_id[:80],
+                    iban=iban[:40],
+                    institution_id=fin[:80],
+                    institution_name=(fin or "Banca")[:120],
+                    name=name[:200],
+                    currency=(acc.get("currencyCode") or "EUR"),
                     status="linked",
-                    expires_at=expires_at,
+                    expires_at=access_exp,
+                    access_token=access_token,
+                    refresh_token=refresh_token,
+                    token_expires_at=token_exp,
                 )
                 db.session.add(ba)
                 saved += 1
             db.session.commit()
-            audit("bank_connect_ok", target=f"institution:{institution_id}",
-                  details=f"{saved} conti collegati")
+            audit("bank_connect_ok", target="tink", details=f"{saved} conti")
             flash(f"✅ {saved} conto/i collegato/i. Click 'Sincronizza' per scaricare le transazioni.",
                   "success")
         except Exception as e:
-            logging.exception("Errore bank callback")
+            logging.exception("Errore Tink callback")
             audit("bank_connect_failed", details=str(e)[:200])
             flash(f"❌ Errore: {e}", "danger")
         return redirect(url_for("bank_overview"))
@@ -2002,7 +2011,8 @@ def create_app():
                       "backup_s3_enabled", "backup_s3_endpoint_url", "backup_s3_bucket",
                       "backup_s3_access_key_id", "backup_s3_secret_access_key",
                       "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix",
-                      "gocardless_secret_id", "gocardless_secret_key"]
+                      "gocardless_secret_id", "gocardless_secret_key",
+                      "tink_client_id", "tink_client_secret"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -2016,7 +2026,8 @@ def create_app():
                     val = val.strip().strip("\r\n\t ")
                     if k in ("smtp_password", "resend_api_key",
                              "backup_s3_secret_access_key",
-                             "gocardless_secret_key") and not val:
+                             "gocardless_secret_key",
+                             "tink_client_secret") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
                     if old_val != val:
@@ -2696,6 +2707,22 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE users ADD COLUMN totp_backup_codes TEXT DEFAULT ''"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna users.totp_backup_codes")
+
+        # ── Tabella bank_accounts (per refactoring GoCardless → Tink) ────────
+        if "bank_accounts" in inspector.get_table_names():
+            existing_ba = {c["name"] for c in inspector.get_columns("bank_accounts")}
+            if "access_token" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN access_token TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.access_token")
+            if "refresh_token" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN refresh_token TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.refresh_token")
+            if "token_expires_at" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN token_expires_at DATETIME"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.token_expires_at")
 
         # ── Multi-tenant: user_id su clients e invoices ──────────────────────
         admin_id_row = conn.execute(text("SELECT MIN(id) FROM users WHERE is_admin = 1")).fetchone()

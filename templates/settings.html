@@ -240,32 +240,35 @@
     </div>
   </div>
 
-  <!-- GoCardless Bank Account Data (solo admin) -->
+  <!-- Tink (riconciliazione bancaria PSD2) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
-      <i class="bi bi-bank me-1"></i> GoCardless Bank Account Data
+      <i class="bi bi-bank me-1"></i> Tink (riconciliazione bancaria)
       <span class="badge bg-warning text-dark ms-2">ADMIN</span>
     </div>
     <div class="card-body">
       <div class="alert alert-info py-2 small mb-3">
-        Provider PSD2 per riconciliazione automatica con i conti bancari italiani.
-        <strong>Gratis</strong> fino a 50.000 transazioni/mese.
+        Provider PSD2 (Visa) per il collegamento ai conti bancari italiani in sola lettura.
+        Free tier per sviluppatori, poi a consumo.
         <ol class="mb-0 mt-2">
-          <li>Registrati su <a href="https://bankaccountdata.gocardless.com/" target="_blank">bankaccountdata.gocardless.com</a></li>
-          <li>Vai su <strong>User secrets</strong> → "Create new"</li>
-          <li>Copia <code>secret_id</code> e <code>secret_key</code> qui sotto</li>
+          <li>Registrati su <a href="https://console.tink.com/" target="_blank">console.tink.com</a> (Tink Developer Console)</li>
+          <li>Crea un'app → ottieni <strong>Client ID</strong> e <strong>Client Secret</strong></li>
+          <li>Aggiungi il <strong>Redirect URI</strong>:
+              <code>https://gestfatture.com/my-integrations/bank/callback</code></li>
+          <li>Abilita lo scope <code>accounts:read,transactions:read,credentials:read</code></li>
+          <li>Copia le credenziali qui sotto</li>
         </ol>
       </div>
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label fw-semibold">Secret ID</label>
-          <input type="text" name="gocardless_secret_id" class="form-control font-monospace"
-                 value="{{ settings.gocardless_secret_id }}" placeholder="UUID v4">
+          <label class="form-label fw-semibold">Tink Client ID</label>
+          <input type="text" name="tink_client_id" class="form-control font-monospace"
+                 value="{{ settings.tink_client_id }}" placeholder="UUID">
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">Secret Key</label>
-          <input type="password" name="gocardless_secret_key" class="form-control"
-                 value="{{ settings.gocardless_secret_key }}">
+          <label class="form-label fw-semibold">Tink Client Secret</label>
+          <input type="password" name="tink_client_secret" class="form-control"
+                 value="{{ settings.tink_client_secret }}">
           <div class="form-text">Lascia vuoto per non modificare. Verrà cifrato at-rest.</div>
         </div>
       </div>

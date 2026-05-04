@@ -224,7 +224,8 @@ SENSITIVE_APP_KEYS = {
     "smtp_password", "anthropic_api_key", "stripe_webhook_secret",
     "paypal_webhook_id", "resend_api_key",
     "backup_s3_secret_access_key",
-    "gocardless_secret_id", "gocardless_secret_key",
+    "gocardless_secret_id", "gocardless_secret_key",  # legacy, dormiente
+    "tink_client_id", "tink_client_secret",
 }
 
 
@@ -593,6 +594,10 @@ class BankAccount(db.Model):
     expires_at           = db.Column(db.DateTime, nullable=True)  # quando scade l'autorizzazione PSD2 (90 gg)
     last_sync_at         = db.Column(db.DateTime, nullable=True)
     last_error           = db.Column(db.Text, default="")
+    # Tink user-level OAuth tokens (cifrati at-rest se SECRETS_ENCRYPTION_KEY)
+    access_token         = db.Column(db.Text, default="")
+    refresh_token        = db.Column(db.Text, default="")
+    token_expires_at     = db.Column(db.DateTime, nullable=True)
     created_at           = db.Column(db.DateTime, default=datetime.utcnow)
 
     transactions = db.relationship("BankTransaction", back_populates="account",

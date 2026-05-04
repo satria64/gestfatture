@@ -1,147 +1,156 @@
-"""Integrazione GoCardless Bank Account Data (PSD2) per riconciliazione bancaria.
+"""Integrazione Tink (Visa) per riconciliazione bancaria PSD2.
 
-Gratis fino a 50.000 transazioni/mese. Copre 2.300+ banche EU incluse italiane.
-Documentazione: https://bankaccountdata.gocardless.com/api/docs
+Tink Money Aggregation API: copre 6.000+ banche EU incluse tutte le italiane.
+Free tier per sviluppatori, poi a consumo (~€0.10/conto/mese in produzione).
 
-Flow:
-  1. Admin imposta gocardless_secret_id + gocardless_secret_key in AppSettings
-  2. Utente sceglie la propria banca dalla lista italiana
-  3. App crea EUA + Requisition → ottiene URL OAuth
-  4. Utente apre URL, autorizza login banca, viene rediretto al callback
-  5. App fetch /requisitions/{id}/accounts → salva ogni conto come BankAccount
-  6. Job giornaliero: per ogni BankAccount, scarica transazioni nuove
-  7. Auto-match con fatture aperte; transazioni dubbie in coda manuale
+Flow OAuth (Tink Link):
+  1. Admin imposta tink_client_id + tink_client_secret in AppSettings
+  2. Utente: redirect a Tink Link → sceglie banca → autorizza (SCA)
+  3. Callback con `?code=...` → exchange per access_token + refresh_token (90gg)
+  4. Fetch accounts → salva BankAccount con tokens
+  5. Sync transazioni con access_token (refresh on-demand)
+
+Documentazione: https://docs.tink.com/api
 """
 import json
 import logging
 import re
+import secrets
+import unicodedata
 from datetime import datetime, date, timedelta
 
 import requests
 
 log = logging.getLogger(__name__)
 
-GC_BASE_URL = "https://bankaccountdata.gocardless.com/api/v2"
-HTTP_TIMEOUT = 25
-ACCESS_VALID_DAYS = 90       # massimo PSD2
-MAX_HISTORICAL_DAYS = 90     # quanto indietro possiamo scaricare
+TINK_API_URL  = "https://api.tink.com"
+TINK_LINK_URL = "https://link.tink.com/1.0/transactions/connect-accounts"
+HTTP_TIMEOUT  = 25
+ACCESS_VALID_DAYS = 90  # massimo PSD2
 
 
-# ─── Token management (cached) ────────────────────────────────────────────
-_TOKEN_CACHE = {"access": None, "expires_at": None}
-
-
+# ─── Credenziali admin + token app-level ─────────────────────────────────
 def _get_credentials() -> tuple[str, str]:
     from models import AppSettings
     return (
-        AppSettings.get("gocardless_secret_id", "").strip(),
-        AppSettings.get("gocardless_secret_key", "").strip(),
+        AppSettings.get("tink_client_id", "").strip(),
+        AppSettings.get("tink_client_secret", "").strip(),
     )
 
 
-def _get_access_token() -> str:
-    """Restituisce un access token valido, rifrescandolo se necessario."""
-    now = datetime.utcnow()
-    cached = _TOKEN_CACHE.get("access")
-    expires = _TOKEN_CACHE.get("expires_at")
-    if cached and expires and now < expires - timedelta(minutes=5):
-        return cached
-
-    sid, skey = _get_credentials()
-    if not sid or not skey:
-        raise RuntimeError("GoCardless: secret_id/secret_key non configurati in admin")
-
-    r = requests.post(
-        f"{GC_BASE_URL}/token/new/",
-        json={"secret_id": sid, "secret_key": skey},
-        timeout=HTTP_TIMEOUT,
-    )
+def _post_form(path: str, data: dict, auth_token: str | None = None) -> dict:
+    headers = {"Accept": "application/json"}
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    r = requests.post(f"{TINK_API_URL}{path}", data=data,
+                      headers=headers, timeout=HTTP_TIMEOUT)
     if r.status_code >= 400:
-        raise RuntimeError(f"GoCardless token error {r.status_code}: {r.text[:300]}")
-    data = r.json()
-    _TOKEN_CACHE["access"] = data["access"]
-    _TOKEN_CACHE["expires_at"] = now + timedelta(seconds=int(data.get("access_expires", 86400)))
-    return data["access"]
+        raise RuntimeError(f"Tink POST {path} → {r.status_code}: {r.text[:300]}")
+    return r.json()
 
 
-def _gc_get(path: str) -> dict | list:
-    token = _get_access_token()
-    r = requests.get(f"{GC_BASE_URL}{path}",
+def _get_json(path: str, token: str) -> dict:
+    r = requests.get(f"{TINK_API_URL}{path}",
                      headers={"Authorization": f"Bearer {token}",
                               "Accept": "application/json"},
                      timeout=HTTP_TIMEOUT)
     if r.status_code >= 400:
-        raise RuntimeError(f"GoCardless GET {path} → {r.status_code}: {r.text[:300]}")
+        raise RuntimeError(f"Tink GET {path} → {r.status_code}: {r.text[:300]}")
     return r.json()
 
 
-def _gc_post(path: str, body: dict) -> dict:
-    token = _get_access_token()
-    r = requests.post(f"{GC_BASE_URL}{path}",
-                      json=body,
-                      headers={"Authorization": f"Bearer {token}",
-                               "Accept": "application/json"},
-                      timeout=HTTP_TIMEOUT)
-    if r.status_code >= 400:
-        raise RuntimeError(f"GoCardless POST {path} → {r.status_code}: {r.text[:300]}")
-    return r.json()
-
-
-def _gc_delete(path: str) -> bool:
-    token = _get_access_token()
-    r = requests.delete(f"{GC_BASE_URL}{path}",
-                        headers={"Authorization": f"Bearer {token}"},
-                        timeout=HTTP_TIMEOUT)
-    return r.status_code < 400
-
-
-# ─── Public API ───────────────────────────────────────────────────────────
-def list_italian_banks() -> list[dict]:
-    """Restituisce la lista banche italiane disponibili su GoCardless.
-    Ogni dict ha: id, name, bic, logo, transaction_total_days."""
-    return _gc_get("/institutions/?country=it")
-
-
-def create_connection(user_id: int, institution_id: str, redirect_url: str) -> dict:
-    """Crea EUA + Requisition. Restituisce dict con `link` (OAuth URL) e
-    `id` (requisition_id da salvare per il callback)."""
-    # Step 1: End User Agreement (specifica scope + durata)
-    eua = _gc_post("/agreements/enduser/", {
-        "institution_id": institution_id,
-        "max_historical_days": MAX_HISTORICAL_DAYS,
-        "access_valid_for_days": ACCESS_VALID_DAYS,
-        "access_scope": ["balances", "details", "transactions"],
+def _get_app_token(scope: str) -> str:
+    """Token app-level (client_credentials) per chiamate amministrative."""
+    cid, csec = _get_credentials()
+    if not cid or not csec:
+        raise RuntimeError("Tink: client_id/client_secret non configurati in admin")
+    data = _post_form("/api/v1/oauth/token", {
+        "client_id": cid,
+        "client_secret": csec,
+        "grant_type": "client_credentials",
+        "scope": scope,
     })
-    # Step 2: Requisition (genera link OAuth)
-    req = _gc_post("/requisitions/", {
-        "redirect": redirect_url,
-        "institution_id": institution_id,
-        "agreement": eua["id"],
-        "reference": f"gestfatture-u{user_id}-{int(datetime.utcnow().timestamp())}",
-        "user_language": "IT",
+    return data["access_token"]
+
+
+# ─── Connessione: build URL Tink Link ────────────────────────────────────
+def build_link_url(redirect_url: str, state: str, market: str = "IT",
+                   locale: str = "it_IT") -> str:
+    """Genera l'URL Tink Link a cui rediriggere l'utente per il flow PSD2.
+    Lo state è anti-CSRF e identifica la sessione."""
+    cid, _ = _get_credentials()
+    if not cid:
+        raise RuntimeError("Tink client_id mancante")
+    from urllib.parse import urlencode
+    params = {
+        "client_id": cid,
+        "redirect_uri": redirect_url,
+        "market": market,
+        "locale": locale,
+        "state": state,
+        "test": "false",  # set "true" per sandbox banche di test
+    }
+    return f"{TINK_LINK_URL}?{urlencode(params)}"
+
+
+def exchange_code(code: str, redirect_url: str) -> dict:
+    """Scambia il code restituito da Tink Link per access_token + refresh_token utente."""
+    cid, csec = _get_credentials()
+    return _post_form("/api/v1/oauth/token", {
+        "code": code,
+        "client_id": cid,
+        "client_secret": csec,
+        "grant_type": "authorization_code",
+        "redirect_uri": redirect_url,
     })
-    return {"id": req["id"], "link": req["link"]}
 
 
-def fetch_requisition_accounts(requisition_id: str) -> dict:
-    """Dopo il callback, recupera la lista accounts collegati alla requisition."""
-    return _gc_get(f"/requisitions/{requisition_id}/")
+def refresh_user_token(refresh_token: str) -> dict:
+    cid, csec = _get_credentials()
+    return _post_form("/api/v1/oauth/token", {
+        "refresh_token": refresh_token,
+        "client_id": cid,
+        "client_secret": csec,
+        "grant_type": "refresh_token",
+    })
 
 
-def fetch_account_details(account_id: str) -> dict:
-    return _gc_get(f"/accounts/{account_id}/details/")
+def list_user_accounts(user_token: str) -> list[dict]:
+    """GET /data/v2/accounts → lista conti collegati di questo utente."""
+    data = _get_json("/data/v2/accounts", user_token)
+    return data.get("accounts", []) or []
 
 
-def fetch_transactions(account_id: str, date_from: date | None = None) -> dict:
-    """Restituisce dict con `booked` e `pending` lists di transazioni."""
-    qs = ""
+def list_transactions(user_token: str, account_id: str,
+                      date_from: date | None = None) -> list[dict]:
+    """GET /data/v2/transactions filtrate per account."""
+    qs = f"?accountIdIn={account_id}&pageSize=400"
     if date_from:
-        qs = f"?date_from={date_from.isoformat()}"
-    data = _gc_get(f"/accounts/{account_id}/transactions/{qs}")
-    return data.get("transactions", {"booked": [], "pending": []})
+        qs += f"&bookedDateGte={date_from.isoformat()}"
+    data = _get_json(f"/data/v2/transactions{qs}", user_token)
+    return data.get("transactions", []) or []
 
 
 # ─── Sync transactions in DB ─────────────────────────────────────────────
+def _ensure_fresh_token(bank_account) -> str:
+    """Restituisce un access_token valido per il bank_account, refreshandolo se necessario."""
+    from models import db
+    now = datetime.utcnow()
+    if bank_account.access_token and bank_account.token_expires_at \
+       and bank_account.token_expires_at > now + timedelta(minutes=2):
+        return bank_account.access_token
+    # Refresh
+    if not bank_account.refresh_token:
+        raise RuntimeError("Refresh token mancante: l'utente deve ri-autorizzare")
+    data = refresh_user_token(bank_account.refresh_token)
+    bank_account.access_token = data["access_token"]
+    if data.get("refresh_token"):
+        bank_account.refresh_token = data["refresh_token"]
+    bank_account.token_expires_at = now + timedelta(seconds=int(data.get("expires_in", 3600)))
+    db.session.commit()
+    return bank_account.access_token
+
+
 def _parse_date(s: str | None):
     if not s:
         return None
@@ -151,47 +160,63 @@ def _parse_date(s: str | None):
         return None
 
 
-def upsert_transaction(db, bank_account, tx_data: dict) -> "BankTransaction | None":
-    """Inserisce o aggiorna una transazione. Restituisce (BankTransaction, was_new) o None."""
+def upsert_transaction(db, bank_account, tx_data: dict):
+    """Inserisce una transazione Tink. Tink schema:
+    - id (str)
+    - accountId (str)
+    - amount: { currencyCode, value: { scale, unscaledValue } }
+    - dates: { booked, value }
+    - descriptions: { display, original }
+    - counterparties: { payer/payee }
+    - status: BOOKED / PENDING
+    - reference (str opzionale, spesso contiene il numero fattura)
+    """
     from models import BankTransaction
-    ext_id = tx_data.get("transactionId") or tx_data.get("internalTransactionId") or ""
+    ext_id = tx_data.get("id", "")[:120]
     if not ext_id:
-        # Fallback: hash dei campi principali
-        ext_id = f"hash-{tx_data.get('bookingDate','')}-{tx_data.get('transactionAmount',{}).get('amount','')}-{(tx_data.get('remittanceInformationUnstructured','') or '')[:40]}"
-    ext_id = ext_id[:120]
-
+        return None
     existing = BankTransaction.query.filter_by(
         bank_account_id=bank_account.id, external_id=ext_id
     ).first()
     if existing:
         return existing
 
-    amt_raw = tx_data.get("transactionAmount", {})
+    amt_obj = tx_data.get("amount", {})
+    val_obj = amt_obj.get("value", {}) or {}
     try:
-        amount = float(amt_raw.get("amount", 0))
+        unscaled = float(val_obj.get("unscaledValue", 0))
+        scale = int(val_obj.get("scale", 2))
+        amount = unscaled / (10 ** scale)
     except Exception:
         amount = 0.0
+    currency = amt_obj.get("currencyCode", "EUR")
 
-    debtor = tx_data.get("debtorName") or tx_data.get("creditorName") or ""
-    debtor_iban = (tx_data.get("debtorAccount", {}) or {}).get("iban") or \
-                  (tx_data.get("creditorAccount", {}) or {}).get("iban") or ""
-    desc = (tx_data.get("remittanceInformationUnstructured") or "")
-    if not desc:
-        # Concatenare structured se presente
-        struct = tx_data.get("remittanceInformationStructured") or ""
-        desc = struct or (tx_data.get("additionalInformation") or "")
+    descs = tx_data.get("descriptions", {}) or {}
+    description = (descs.get("original") or descs.get("display") or
+                   tx_data.get("reference") or "")
+
+    counter = tx_data.get("counterparties", {}) or {}
+    payer = counter.get("payer", {}) or {}
+    payee = counter.get("payee", {}) or {}
+    debtor_name = payer.get("name") or payee.get("name") or ""
+    debtor_iban = ((payer.get("identifiers", {}) or {}).get("iban", {}) or {}).get("iban") or \
+                  ((payee.get("identifiers", {}) or {}).get("iban", {}) or {}).get("iban") or ""
+
+    dates = tx_data.get("dates", {}) or {}
+    booking = _parse_date(dates.get("booked"))
+    value_d = _parse_date(dates.get("value"))
 
     tx = BankTransaction(
         bank_account_id=bank_account.id,
         user_id=bank_account.user_id,
         external_id=ext_id,
-        booking_date=_parse_date(tx_data.get("bookingDate")),
-        value_date=_parse_date(tx_data.get("valueDate")),
+        booking_date=booking,
+        value_date=value_d,
         amount=amount,
-        currency=amt_raw.get("currency", "EUR"),
-        debtor_name=str(debtor)[:200],
+        currency=currency,
+        debtor_name=str(debtor_name)[:200],
         debtor_iban=str(debtor_iban)[:40],
-        description=str(desc)[:5000],
+        description=str(description)[:5000],
         raw_data=json.dumps(tx_data, ensure_ascii=False)[:8000],
         status="non_invoice" if amount <= 0 else "pending",
     )
@@ -200,18 +225,14 @@ def upsert_transaction(db, bank_account, tx_data: dict) -> "BankTransaction | No
 
 
 def sync_account(db, bank_account, days_back: int = 30) -> dict:
-    """Scarica transazioni nuove da GoCardless per un singolo account.
-    Restituisce dict con stats."""
-    from models import BankAccount
     stats = {"new": 0, "errors": 0}
     try:
-        # Sync incrementale: dal last_sync_at o dagli ultimi N giorni
+        token = _ensure_fresh_token(bank_account)
         date_from = (date.today() - timedelta(days=days_back))
         if bank_account.last_sync_at:
             date_from = max(date_from, bank_account.last_sync_at.date() - timedelta(days=2))
-        data = fetch_transactions(bank_account.external_account_id, date_from=date_from)
-        booked = data.get("booked", []) or []
-        for tx in booked:
+        txs = list_transactions(token, bank_account.external_account_id, date_from)
+        for tx in txs:
             tx_obj = upsert_transaction(db, bank_account, tx)
             if tx_obj and tx_obj.id is None:
                 stats["new"] += 1
@@ -223,8 +244,7 @@ def sync_account(db, bank_account, days_back: int = 30) -> dict:
         log.error("Sync bank account u=%d acc=%s fallito: %s",
                   bank_account.user_id, bank_account.external_account_id, e)
         bank_account.last_error = str(e)[:500]
-        # Se 401/403 → expired/revoked
-        if "401" in str(e) or "403" in str(e):
+        if "401" in str(e) or "403" in str(e) or "invalid_grant" in str(e).lower():
             bank_account.status = "expired"
         else:
             bank_account.status = "error"
@@ -234,7 +254,6 @@ def sync_account(db, bank_account, days_back: int = 30) -> dict:
 
 
 def sync_all_accounts_for_user(db, user_id: int, days_back: int = 30) -> dict:
-    """Sync di tutti gli account collegati di un utente."""
     from models import BankAccount
     stats = {"new": 0, "errors": 0, "accounts": 0}
     accs = BankAccount.query.filter_by(user_id=user_id).filter(
@@ -248,12 +267,10 @@ def sync_all_accounts_for_user(db, user_id: int, days_back: int = 30) -> dict:
     return stats
 
 
-# ─── Auto-reconciliation: tentative match transazione ↔ fattura ─────────
+# ─── Auto-reconciliation: match tx ↔ fattura (invariato vs versione precedente) ──
 def _norm_text(s: str) -> str:
-    """Lowercase + remove accents + strip punctuation."""
     if not s:
         return ""
-    import unicodedata
     s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9 ]+", " ", s.lower())
 
@@ -262,81 +279,59 @@ def _amount_close(a: float, b: float, tolerance: float = 0.01) -> bool:
     return abs(a - b) <= tolerance
 
 
-def find_matches_for_transaction(tx, candidates) -> list[tuple["Invoice", int, str]]:
-    """Per una transazione e una lista di Invoice candidate, restituisce
-    [(invoice, score, reason)] ordinata per score decrescente.
-    Score 0-100. >=80 considerato match certo per auto-reconcile."""
+def find_matches_for_transaction(tx, candidates):
     desc_norm = _norm_text(tx.description or "")
     debtor_norm = _norm_text(tx.debtor_name or "")
     results = []
     for inv in candidates:
         if not _amount_close(tx.amount, inv.amount):
-            continue  # importo diverso → non considerare
-        score = 30  # base: importo combacia
+            continue
+        score = 30
         reasons = ["importo combacia"]
-
-        # Numero fattura nella descrizione (forte segnale)
         num_norm = _norm_text(inv.number or "")
         if num_norm and len(num_norm) >= 2 and num_norm in desc_norm:
             score += 50
             reasons.append(f"numero fattura '{inv.number}' nella causale")
-
-        # Nome cliente nella descrizione o nel debtor_name
         client_norm = _norm_text(inv.client.name) if inv.client else ""
         if client_norm and len(client_norm) >= 4:
-            # tokenize: se almeno 2 parole del client name compaiono in debtor o desc
             tokens = [t for t in client_norm.split() if len(t) >= 4]
             hits_debtor = sum(1 for t in tokens if t in debtor_norm)
-            hits_desc   = sum(1 for t in tokens if t in desc_norm)
+            hits_desc = sum(1 for t in tokens if t in desc_norm)
             if hits_debtor >= 1 or hits_desc >= 2:
                 score += 20
                 reasons.append("nome cliente coincide")
-
-        # P.IVA cliente nella descrizione
         if inv.client and inv.client.vat_number:
             vat = re.sub(r"\D", "", inv.client.vat_number)
             if vat and vat in re.sub(r"\D", "", tx.description or ""):
                 score += 30
                 reasons.append("P.IVA cliente nella causale")
-
         score = min(100, score)
         results.append((inv, score, "; ".join(reasons)))
-
     results.sort(key=lambda x: -x[1])
     return results
 
 
 def auto_reconcile_user(db, user_id: int, score_threshold: int = 80) -> dict:
-    """Per ogni transazione pending dell'utente, prova match con le sue fatture
-    pending/overdue. Se trova UN match con score >= threshold, riconcilia.
-    Restituisce stats."""
     from models import BankTransaction, Invoice
     stats = {"auto_matched": 0, "left_pending": 0, "negative_or_outflow": 0}
-
-    # Solo entrate (amount > 0) ancora pending
     pending_tx = BankTransaction.query.filter(
         BankTransaction.user_id == user_id,
         BankTransaction.status == "pending",
         BankTransaction.amount > 0,
     ).all()
-
     if not pending_tx:
         return stats
-
-    # Fatture aperte dell'utente (non pagate, non NC, non annullate)
     open_invoices = Invoice.query.filter(
         Invoice.user_id == user_id,
         Invoice.status.in_(["pending", "overdue"]),
         db.or_(Invoice.document_type != "TD04", Invoice.document_type.is_(None)),
     ).all()
-
     for tx in pending_tx:
         matches = find_matches_for_transaction(tx, open_invoices)
         if not matches:
             stats["left_pending"] += 1
             continue
         top_inv, top_score, reason = matches[0]
-        # Auto-match solo se UN candidato chiaro (top score molto > 2°)
         is_unique = (len(matches) == 1) or (top_score - matches[1][1] >= 20)
         if top_score >= score_threshold and is_unique:
             tx.matched_invoice_id = top_inv.id
@@ -344,31 +339,26 @@ def auto_reconcile_user(db, user_id: int, score_threshold: int = 80) -> dict:
             tx.match_confidence = top_score
             tx.match_reason = reason
             tx.matched_at = datetime.utcnow()
-            # Marca la fattura come pagata
             top_inv.status = "paid"
             top_inv.payment_date = tx.booking_date or date.today()
             top_inv.payment_ref = f"bank:{tx.external_id[:60]}"
             stats["auto_matched"] += 1
-            # Rimuovi dall'elenco per non doppio-match
             try:
                 open_invoices.remove(top_inv)
             except ValueError:
                 pass
         else:
             stats["left_pending"] += 1
-
     db.session.commit()
     return stats
 
 
 def disconnect_account(db, bank_account) -> bool:
-    """Cancella la requisition su GoCardless e marca l'account disabilitato.
-    Mantiene le transazioni storiche per audit/contabilità."""
-    try:
-        if bank_account.requisition_id:
-            _gc_delete(f"/requisitions/{bank_account.requisition_id}/")
-    except Exception as e:
-        log.warning("Errore disconnect requisition: %s", e)
+    """Per Tink basta scartare i token lato nostro: GestFatture non può più
+    chiamare le API. L'utente può anche revocare l'accesso direttamente
+    sul portale della sua banca."""
     bank_account.status = "disabled"
+    bank_account.access_token = ""
+    bank_account.refresh_token = ""
     db.session.commit()
     return True

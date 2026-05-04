@@ -7,86 +7,42 @@
 </a>
 
 <div class="mb-4 mt-2">
-  <h2><i class="bi bi-bank me-2"></i>Scegli la tua banca</h2>
+  <h2><i class="bi bi-bank me-2"></i>Collega un conto bancario</h2>
   <p class="text-muted small">
-    Ti reindirizzeremo al sito della tua banca per autorizzare l'accesso
-    in <strong>sola lettura</strong> alle tue transazioni (PSD2). GestFatture
-    NON può fare bonifici o muovere denaro: solo leggere il movimento conto.
+    Procedendo verrai reindirizzato al portale <strong>Tink</strong> (provider PSD2 di Visa)
+    dove sceglierai la tua banca italiana e autorizzerai l'accesso in
+    <strong>sola lettura</strong> alle transazioni.
   </p>
 </div>
 
-{% if banks %}
-<div class="card border-0 shadow-sm mb-3">
+<div class="card border-0 shadow-sm" style="max-width:640px">
   <div class="card-body">
-    <input type="search" id="bankSearch" class="form-control mb-3"
-           placeholder="🔍 Cerca la tua banca (es. Intesa, Unicredit, Poste, BNL...)">
+    <h5 class="mb-3">Come funziona</h5>
+    <ol class="small">
+      <li>Click sul bottone qui sotto → vai sul sito <strong>Tink</strong> (in italiano)</li>
+      <li>Cerca e seleziona la tua banca dalla lista (tutte le banche italiane sono coperte)</li>
+      <li>Login sul portale della tua banca + autorizzazione SCA (codice OTP)</li>
+      <li>Tornerai automaticamente qui con il conto collegato</li>
+      <li>Click "Sincronizza" per scaricare le ultime 30-90gg di transazioni</li>
+    </ol>
 
-    <form method="post" id="bankForm">
+    <hr class="my-3">
+
+    <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <input type="hidden" name="institution_id" id="selectedInstitution">
-
-      <div class="row g-2" id="bankGrid">
-        {% for b in banks %}
-        <div class="col-md-6 col-lg-4 bank-item"
-             data-name="{{ (b.name or '')|lower }}"
-             data-bic="{{ (b.bic or '')|lower }}">
-          <button type="button"
-                  class="btn btn-outline-secondary w-100 text-start py-3 d-flex align-items-center gap-2"
-                  onclick="selectBank('{{ b.id }}', '{{ b.name|e }}')">
-            {% if b.logo %}
-              <img src="{{ b.logo }}" alt="" style="width:32px; height:32px; object-fit:contain">
-            {% else %}
-              <i class="bi bi-bank fs-4 text-muted"></i>
-            {% endif %}
-            <div class="text-truncate">
-              <div class="fw-semibold small">{{ b.name }}</div>
-              {% if b.bic %}<div class="small text-muted">{{ b.bic }}</div>{% endif %}
-            </div>
-          </button>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div id="noResults" class="text-muted text-center p-4" style="display:none">
-        Nessuna banca trovata con questo nome.
-      </div>
+      <button class="btn btn-primary btn-lg w-100">
+        <i class="bi bi-box-arrow-up-right me-2"></i> Vai a Tink per collegare
+      </button>
     </form>
   </div>
 </div>
-{% else %}
-<div class="alert alert-warning">
-  <i class="bi bi-exclamation-triangle me-1"></i>
-  Impossibile caricare la lista banche. Verifica che l'admin abbia configurato
-  le credenziali GoCardless in <a href="{{ url_for('settings') }}">Impostazioni</a>.
-</div>
-{% endif %}
 
-<div class="alert alert-info small">
+<div class="alert alert-info small mt-4" style="max-width:640px">
   <i class="bi bi-shield-check me-1"></i>
   <strong>Sicurezza</strong>: la tua password della banca <em>non passa MAI</em> da
-  GestFatture. Si autentica direttamente sul portale della banca tramite OAuth/SCA
-  (codice OTP). GestFatture riceve solo un token in sola lettura, valido 90 giorni.
+  GestFatture, né da Tink. Si autentica direttamente sul portale della tua banca.
+  GestFatture riceve da Tink solo un token in <strong>sola lettura</strong>, valido
+  90 giorni. Niente bonifici, niente movimenti di denaro: solo lettura della lista
+  movimenti per riconciliarli con le tue fatture.
 </div>
-
-<script>
-function selectBank(id, name) {
-  if (!confirm("Procedere con la connessione a " + name + "?\\n\\nVerrai reindirizzato al sito della banca per autorizzare l'accesso.")) return;
-  document.getElementById('selectedInstitution').value = id;
-  document.getElementById('bankForm').submit();
-}
-(function () {
-  var s = document.getElementById('bankSearch');
-  if (!s) return;
-  s.addEventListener('input', function () {
-    var q = s.value.trim().toLowerCase();
-    var any = false;
-    document.querySelectorAll('.bank-item').forEach(function (el) {
-      var hit = !q || el.dataset.name.indexOf(q) !== -1 || el.dataset.bic.indexOf(q) !== -1;
-      el.style.display = hit ? '' : 'none';
-      if (hit) any = true;
-    });
-    document.getElementById('noResults').style.display = any ? 'none' : '';
-  });
-})();
-</script>
 {% endblock %}
