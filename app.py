@@ -542,6 +542,15 @@ def create_app():
         )
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # FAVICON (fallback per browser che cercano /favicon.ico in radice)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_from_directory(
+            app.static_folder, "favicon.png", mimetype="image/png"
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # KNOWLEDGE BASE / HELP
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/help")
