@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}{% if supplier %}Modifica fornitore{% else %}Nuovo fornitore{% endif %} – GestFatture{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('suppliers') }}" class="text-muted small text-decoration-none">
+  <i class="bi bi-arrow-left me-1"></i> Torna ai fornitori
+</a>
+
+<h2 class="mt-2 mb-4">
+  <i class="bi bi-truck me-2"></i>
+  {% if supplier %}Modifica fornitore{% else %}Nuovo fornitore{% endif %}
+</h2>
+
+<form method="post" class="card border-0 shadow-sm" style="max-width:720px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-md-8">
+        <label class="form-label fw-semibold">Ragione sociale *</label>
+        <input type="text" name="name" class="form-control" required
+               value="{{ supplier.name if supplier else '' }}"
+               placeholder="Es. ACME Forniture Srl">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">P.IVA / CF</label>
+        <input type="text" name="vat_number" class="form-control"
+               value="{{ supplier.vat_number if supplier else '' }}"
+               placeholder="IT12345678901">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Email</label>
+        <input type="email" name="email" class="form-control"
+               value="{{ supplier.email if supplier else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">PEC</label>
+        <input type="email" name="pec" class="form-control"
+               value="{{ supplier.pec if supplier else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Telefono</label>
+        <input type="tel" name="phone" class="form-control"
+               value="{{ supplier.phone if supplier else '' }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">IBAN</label>
+        <input type="text" name="iban" class="form-control font-monospace"
+               value="{{ supplier.iban if supplier else '' }}"
+               placeholder="IT60X0542811101000000123456">
+        <div class="form-text">Per fare bonifici al fornitore.</div>
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Indirizzo</label>
+        <input type="text" name="address" class="form-control"
+               value="{{ supplier.address if supplier else '' }}"
+               placeholder="Via Roma 1, 20100 Milano">
+      </div>
+    </div>
+
+    <div class="mt-4 d-flex gap-2">
+      <button class="btn btn-primary">
+        <i class="bi bi-save me-1"></i>
+        {% if supplier %}Aggiorna{% else %}Crea fornitore{% endif %}
+      </button>
+      <a href="{{ url_for('suppliers') }}" class="btn btn-outline-secondary">Annulla</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

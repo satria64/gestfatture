@@ -25,11 +25,27 @@ limiter = Limiter(get_remote_address, default_limits=["1000 per hour"])
 
 # ─── Helpers multi-tenant: filtri per current_user ───────────────────────────
 def my_clients():
-    return Client.query.filter_by(user_id=current_user.id)
+    """Anagrafica clienti (chi compra da me). Esclude i fornitori puri."""
+    return Client.query.filter_by(user_id=current_user.id).filter(
+        db.or_(Client.is_supplier.is_(False), Client.is_supplier.is_(None))
+    )
+
+
+def my_suppliers():
+    """Anagrafica fornitori (chi fattura a me)."""
+    return Client.query.filter_by(user_id=current_user.id, is_supplier=True)
 
 
 def my_invoices():
-    return Invoice.query.filter_by(user_id=current_user.id)
+    """Fatture attive (emesse a clienti). Esclude le passive."""
+    return Invoice.query.filter_by(user_id=current_user.id).filter(
+        db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None))
+    )
+
+
+def my_payables():
+    """Fatture passive (ricevute da fornitori)."""
+    return Invoice.query.filter_by(user_id=current_user.id, is_passive=True)
 
 
 def get_my_client(cid):
@@ -1053,6 +1069,40 @@ def create_app():
             .limit(5).all()
         )
 
+        # ── LATO PASSIVO: pagamenti che devo fare ─────────────────────────────
+        for inv in my_payables().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            inv.update_status()
+        db.session.commit()
+
+        payable_pending_count = my_payables().filter_by(status="pending").count()
+        payable_overdue_count = my_payables().filter_by(status="overdue").count()
+        payable_paid_count    = my_payables().filter_by(status="paid").count()
+
+        sum_pq = lambda **kw: (
+            db.session.query(db.func.sum(Invoice.amount))
+            .filter_by(user_id=uid, is_passive=True, **kw)
+            .scalar() or 0
+        )
+        payable_open_amount    = sum_pq(status="pending") + sum_pq(status="overdue")
+        payable_overdue_amount = sum_pq(status="overdue")
+        payable_paid_30d = (
+            db.session.query(db.func.sum(Invoice.amount))
+            .filter(Invoice.user_id == uid, Invoice.is_passive.is_(True),
+                    Invoice.status == "paid",
+                    Invoice.payment_date >= (today - timedelta(days=30)))
+            .scalar() or 0
+        )
+
+        upcoming_payables = sorted(
+            [i for i in my_payables().filter(
+                Invoice.status.in_(["pending", "overdue"])
+            ).all()],
+            key=lambda i: i.due_date
+        )[:5]
+
+        # Saldo netto previsto = entrate aperte - uscite aperte
+        net_position = total_amount_pending + total_overdue_amount - payable_open_amount
+
         return render_template("dashboard.html",
             total_invoices=total_invoices, paid_invoices=paid_invoices,
             overdue_invoices=overdue_invoices, pending_invoices=pending_invoices,
@@ -1063,6 +1113,14 @@ def create_app():
             credit_notes_count=credit_notes_count, credit_notes_amount=credit_notes_amount,
             debit_notes_count=debit_notes_count,   debit_notes_amount=debit_notes_amount,
             upcoming=upcoming, top_overdue=top_overdue, top_debtors=top_debtors,
+            payable_pending_count=payable_pending_count,
+            payable_overdue_count=payable_overdue_count,
+            payable_paid_count=payable_paid_count,
+            payable_open_amount=payable_open_amount,
+            payable_overdue_amount=payable_overdue_amount,
+            payable_paid_30d=payable_paid_30d,
+            upcoming_payables=upcoming_payables,
+            net_position=net_position,
         )
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -1163,6 +1221,192 @@ def create_app():
         else:
             flash("Nessun duplicato trovato.", "info")
         return redirect(url_for("clients"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # FORNITORI (lato passivo) — Client.is_supplier=True
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/suppliers")
+    @login_required
+    def suppliers():
+        q = request.args.get("q", "")
+        sort = request.args.get("sort", "name")
+        q_obj = my_suppliers()
+        if q:
+            q_obj = q_obj.filter(Client.name.ilike(f"%{q}%"))
+        q_obj = q_obj.order_by(Client.name)
+        return render_template("suppliers.html", suppliers=q_obj.all(), q=q, sort=sort)
+
+    @app.route("/suppliers/new", methods=["GET", "POST"])
+    @login_required
+    def new_supplier():
+        if request.method == "POST":
+            s = Client(
+                user_id=current_user.id, is_supplier=True,
+                name=request.form["name"], email=request.form.get("email", ""),
+                pec=request.form.get("pec", ""), phone=request.form.get("phone", ""),
+                address=request.form.get("address", ""),
+                vat_number=request.form.get("vat_number", ""),
+                iban=request.form.get("iban", ""),
+            )
+            db.session.add(s); db.session.commit()
+            flash("Fornitore aggiunto.", "success")
+            return redirect(url_for("supplier_detail", sid=s.id))
+        return render_template("new_supplier.html")
+
+    @app.route("/suppliers/<int:sid>")
+    @login_required
+    def supplier_detail(sid):
+        s = Client.query.filter_by(id=sid, user_id=current_user.id, is_supplier=True).first_or_404()
+        # Fatture passive di questo fornitore
+        payables = (Invoice.query.filter_by(user_id=current_user.id,
+                                            client_id=s.id, is_passive=True)
+                    .order_by(Invoice.due_date.desc()).all())
+        total_pending = sum(i.amount for i in payables if i.status in ("pending", "overdue"))
+        total_paid = sum(i.amount for i in payables if i.status == "paid")
+        return render_template("supplier_detail.html", supplier=s, payables=payables,
+                               total_pending=total_pending, total_paid=total_paid)
+
+    @app.route("/suppliers/<int:sid>/edit", methods=["GET", "POST"])
+    @login_required
+    def edit_supplier(sid):
+        s = Client.query.filter_by(id=sid, user_id=current_user.id, is_supplier=True).first_or_404()
+        if request.method == "POST":
+            s.name = request.form["name"]
+            s.email = request.form.get("email", "")
+            s.pec = request.form.get("pec", "")
+            s.phone = request.form.get("phone", "")
+            s.address = request.form.get("address", "")
+            s.vat_number = request.form.get("vat_number", "")
+            s.iban = request.form.get("iban", "")
+            db.session.commit()
+            flash("Fornitore aggiornato.", "success")
+            return redirect(url_for("supplier_detail", sid=s.id))
+        return render_template("new_supplier.html", supplier=s)
+
+    @app.route("/suppliers/<int:sid>/delete", methods=["POST"])
+    @login_required
+    def delete_supplier(sid):
+        s = Client.query.filter_by(id=sid, user_id=current_user.id, is_supplier=True).first_or_404()
+        # Non cancello se ha fatture passive collegate
+        n = Invoice.query.filter_by(client_id=s.id, is_passive=True).count()
+        if n:
+            flash(f"Impossibile cancellare: ha {n} fatture passive collegate.", "danger")
+            return redirect(url_for("supplier_detail", sid=s.id))
+        db.session.delete(s); db.session.commit()
+        flash("Fornitore eliminato.", "info")
+        return redirect(url_for("suppliers"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PAGAMENTI DA FARE — Invoice.is_passive=True
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/payables")
+    @login_required
+    def payables():
+        from sqlalchemy import func as _f
+        status = request.args.get("status", "open")  # open / paid / all
+        q = my_payables()
+        if status == "open":
+            q = q.filter(Invoice.status.in_(["pending", "overdue"]))
+        elif status == "paid":
+            q = q.filter_by(status="paid")
+        invs = q.order_by(Invoice.due_date.asc()).all()
+
+        # Aggiorna stato (pending → overdue se scadute)
+        for inv in invs:
+            inv.update_status()
+        db.session.commit()
+
+        # KPI
+        all_open = my_payables().filter(Invoice.status.in_(["pending", "overdue"])).all()
+        kpi = {
+            "open_count":   len(all_open),
+            "open_amount":  sum(i.amount for i in all_open),
+            "overdue_count": sum(1 for i in all_open if i.status == "overdue"),
+            "overdue_amount": sum(i.amount for i in all_open if i.status == "overdue"),
+            "paid_30d_amount": (
+                db.session.query(_f.sum(Invoice.amount))
+                .filter(Invoice.user_id == current_user.id,
+                        Invoice.is_passive.is_(True),
+                        Invoice.status == "paid",
+                        Invoice.payment_date >= (date.today() - timedelta(days=30)))
+                .scalar() or 0
+            ),
+        }
+        return render_template("payables.html", invs=invs, status=status, kpi=kpi)
+
+    @app.route("/payables/new", methods=["GET", "POST"])
+    @login_required
+    def new_payable():
+        if request.method == "POST":
+            supplier_id = request.form.get("supplier_id", "").strip()
+            if not supplier_id:
+                # Nuovo fornitore al volo (solo se nome compilato)
+                sup_name = request.form.get("new_supplier_name", "").strip()
+                if not sup_name:
+                    flash("Scegli un fornitore o inserisci un nuovo nome.", "warning")
+                    return redirect(url_for("new_payable"))
+                s = Client(
+                    user_id=current_user.id, is_supplier=True, name=sup_name,
+                    vat_number=request.form.get("new_supplier_vat", ""),
+                )
+                db.session.add(s); db.session.flush()
+                supplier_id = s.id
+            try:
+                amount = float(request.form.get("amount", "0").replace(",", "."))
+            except ValueError:
+                flash("Importo non valido.", "danger")
+                return redirect(url_for("new_payable"))
+            inv = Invoice(
+                user_id=current_user.id,
+                client_id=int(supplier_id),
+                is_passive=True,
+                document_type="TD01",
+                number=request.form.get("number", "").strip() or f"PASS-{int(datetime.utcnow().timestamp())}",
+                amount=amount,
+                issue_date=datetime.strptime(request.form.get("issue_date") or date.today().isoformat(), "%Y-%m-%d").date(),
+                due_date=datetime.strptime(request.form.get("due_date") or (date.today() + timedelta(days=30)).isoformat(), "%Y-%m-%d").date(),
+                notes=request.form.get("notes", ""),
+            )
+            inv.update_status()
+            db.session.add(inv); db.session.commit()
+            flash(f"Fattura passiva n. {inv.number} registrata.", "success")
+            return redirect(url_for("payable_detail", iid=inv.id))
+        # GET: form
+        suppliers_list = my_suppliers().order_by(Client.name).all()
+        return render_template("new_payable.html", suppliers=suppliers_list,
+                               today_iso=date.today().isoformat(),
+                               due_iso=(date.today() + timedelta(days=30)).isoformat())
+
+    @app.route("/payables/<int:iid>")
+    @login_required
+    def payable_detail(iid):
+        inv = Invoice.query.filter_by(id=iid, user_id=current_user.id, is_passive=True).first_or_404()
+        return render_template("payable_detail.html", invoice=inv,
+                               today_iso=date.today().isoformat())
+
+    @app.route("/payables/<int:iid>/mark-paid", methods=["POST"])
+    @login_required
+    def payable_mark_paid(iid):
+        inv = Invoice.query.filter_by(id=iid, user_id=current_user.id, is_passive=True).first_or_404()
+        try:
+            pd = request.form.get("payment_date") or date.today().isoformat()
+            inv.payment_date = datetime.strptime(pd, "%Y-%m-%d").date()
+        except Exception:
+            inv.payment_date = date.today()
+        inv.payment_method = request.form.get("payment_method", "")[:40]
+        inv.payment_ref    = request.form.get("payment_ref", "")[:200]
+        inv.status = "paid"
+        db.session.commit()
+        flash(f"✅ Pagamento registrato per la fattura {inv.number}.", "success")
+        return redirect(url_for("payable_detail", iid=iid))
+
+    @app.route("/payables/<int:iid>/delete", methods=["POST"])
+    @login_required
+    def payable_delete(iid):
+        inv = Invoice.query.filter_by(id=iid, user_id=current_user.id, is_passive=True).first_or_404()
+        db.session.delete(inv); db.session.commit()
+        flash("Fattura passiva eliminata.", "info")
+        return redirect(url_for("payables"))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # FATTURE
@@ -2674,6 +2918,26 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN linked_invoice_id INTEGER REFERENCES invoices(id)"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.linked_invoice_id")
+        if "is_passive" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN is_passive INTEGER DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.is_passive")
+        if "payment_method" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.payment_method")
+
+        # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
+        if "clients" in inspector.get_table_names():
+            existing_cli = {c["name"] for c in inspector.get_columns("clients")}
+            if "is_supplier" not in existing_cli:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN is_supplier INTEGER DEFAULT 0"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna clients.is_supplier")
+            if "iban" not in existing_cli:
+                conn.execute(text("ALTER TABLE clients ADD COLUMN iban TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna clients.iban")
 
         # ── Tabella users ────────────────────────────────────────────────────
         if "users" in inspector.get_table_names():

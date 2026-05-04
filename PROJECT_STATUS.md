@@ -184,6 +184,18 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 ### Bandi di finanziamento
 - [x] **Bandi MVP** — scraping AI da MIMIT/Invitalia (estensibile), matching AI personalizzato sul profilo utente (ATECO/regione/dimensione/descrizione), lista filtrabile per score, save/dismiss, sync giornaliero alle 06:00. Sezione "Mio profilo" estesa con campi per matching.
 
+### Lato passivo (fornitori + pagamenti da fare)
+- [x] **Anagrafica fornitori** in `/suppliers` (riusa modello Client con flag `is_supplier=True`, aggiunto campo `iban` per bonifici)
+- [x] **Fatture passive** in `/payables` (Invoice con flag `is_passive=True`, campo `payment_method` per metodo di pagamento)
+- [x] CRUD fornitori (`/suppliers/new`, `/suppliers/<id>`, edit, delete con check fatture collegate)
+- [x] CRUD fatture passive (`/payables/new` con creazione fornitore al volo, mark-paid con data + metodo + ref)
+- [x] Lista filtrabile (Aperte / Pagate / Tutte) con KPI: da pagare, in ritardo, importo aperto, pagato 30gg
+- [x] **Dashboard split** in 3 sezioni:
+  - In alto: **Saldo netto previsto** (entrate aperte − uscite aperte) con colore success/danger
+  - **Lato attivo** (entrate, sezione esistente)
+  - **Lato passivo** (uscite, KPI count + lista prossimi pagamenti)
+- [x] Sidebar: nuove voci "Fornitori" e "Pagamenti"
+
 ### Riconciliazione bancaria (Tink, PSD2)
 - [x] Provider: **Tink** (Visa) — copre tutte le banche italiane. GoCardless temporaneamente disabilitato per nuove signup.
 - [x] Connessione via Tink Link (redirect → scegli banca → SCA → callback con code → exchange per access_token + refresh_token)

@@ -2,12 +2,50 @@
 {% block title %}Dashboard – GestFatture{% endblock %}
 
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
   <h2 class="mb-0"><i class="bi bi-speedometer2 me-2"></i>Dashboard</h2>
-  <a href="{{ url_for('new_invoice') }}" class="btn btn-primary">
-    <i class="bi bi-plus-lg me-1"></i> Nuova fattura
-  </a>
+  <div class="d-flex gap-2">
+    <a href="{{ url_for('new_payable') }}" class="btn btn-outline-danger">
+      <i class="bi bi-credit-card me-1"></i> Nuova passiva
+    </a>
+    <a href="{{ url_for('new_invoice') }}" class="btn btn-primary">
+      <i class="bi bi-plus-lg me-1"></i> Nuova fattura
+    </a>
+  </div>
 </div>
+
+<!-- ═════════════════ SALDO NETTO PREVISTO (entrate - uscite aperte) ═══════════ -->
+<div class="card border-0 shadow-sm mb-4 {% if net_position < 0 %}border-start border-danger border-4{% else %}border-start border-success border-4{% endif %}">
+  <div class="card-body py-3">
+    <div class="row align-items-center g-3">
+      <div class="col-md-4">
+        <small class="text-muted text-uppercase">Saldo netto previsto</small>
+        <div class="fs-3 fw-bold {{ 'text-danger' if net_position < 0 else 'text-success' }}">
+          {{ net_position | eur }}
+        </div>
+        <small class="text-muted">Entrate aperte − Uscite aperte</small>
+      </div>
+      <div class="col-md-4 text-md-center">
+        <small class="text-muted text-uppercase">🟢 Da incassare</small>
+        <div class="fs-4 fw-semibold text-primary">
+          {{ (total_amount_pending + total_overdue_amount) | eur }}
+        </div>
+        <small class="text-muted">{{ pending_invoices + overdue_invoices }} fatture aperte</small>
+      </div>
+      <div class="col-md-4 text-md-end">
+        <small class="text-muted text-uppercase">🔴 Da pagare</small>
+        <div class="fs-4 fw-semibold text-danger">{{ payable_open_amount | eur }}</div>
+        <small class="text-muted">{{ payable_pending_count + payable_overdue_count }} fatture passive aperte</small>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═════════════════ LATO ATTIVO ═════════════════ -->
+<h5 class="text-muted mb-2 mt-1">
+  <i class="bi bi-arrow-down-circle text-success me-1"></i>
+  Attivo (entrate)
+</h5>
 
 <!-- KPI count (numero fatture per stato) -->
 <div class="row g-3 mb-3">
@@ -262,6 +300,125 @@
         {% endif %}
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ═════════════════ LATO PASSIVO (uscite) ═════════════════ -->
+<h5 class="text-muted mb-2 mt-4">
+  <i class="bi bi-arrow-up-circle text-danger me-1"></i>
+  Passivo (uscite — pagamenti da fare)
+</h5>
+
+<!-- KPI passivo count -->
+<div class="row g-3 mb-3">
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Da pagare</p>
+            <h3 class="mb-0 text-warning">{{ payable_pending_count + payable_overdue_count }}</h3>
+          </div>
+          <span class="kpi-icon bg-warning-subtle text-warning"><i class="bi bi-credit-card"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">In ritardo</p>
+            <h3 class="mb-0 text-danger">{{ payable_overdue_count }}</h3>
+          </div>
+          <span class="kpi-icon bg-danger-subtle text-danger"><i class="bi bi-exclamation-triangle"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Totale aperto</p>
+            <h3 class="mb-0 text-danger">{{ payable_open_amount | eur }}</h3>
+          </div>
+          <span class="kpi-icon bg-danger-subtle text-danger"><i class="bi bi-cash-stack"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-sm-6 col-xl-3">
+    <div class="card kpi-card border-0 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start">
+          <div>
+            <p class="text-muted small mb-1">Pagato 30gg</p>
+            <h3 class="mb-0 text-success">{{ payable_paid_30d | eur }}</h3>
+          </div>
+          <span class="kpi-icon bg-success-subtle text-success"><i class="bi bi-check-circle"></i></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lista pagamenti in scadenza -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header fw-semibold bg-danger-subtle text-danger-emphasis">
+    <i class="bi bi-credit-card me-1"></i> Prossimi pagamenti da fare
+  </div>
+  <div class="card-body p-0">
+    {% if upcoming_payables %}
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Fornitore</th><th>Numero</th><th>Importo</th>
+          <th>Scadenza</th><th>Stato</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for inv in upcoming_payables %}
+      {% set sl = inv.status_label %}
+      <tr>
+        <td>
+          <a href="{{ url_for('supplier_detail', sid=inv.client.id) }}" class="text-decoration-none">
+            <strong>{{ inv.client.name }}</strong>
+          </a>
+        </td>
+        <td><a href="{{ url_for('payable_detail', iid=inv.id) }}">{{ inv.number }}</a></td>
+        <td><strong>{{ inv.amount | eur }}</strong></td>
+        <td>
+          {{ inv.due_date | it_date }}
+          {% if inv.status == 'overdue' %}
+            <span class="badge bg-danger ms-1">+{{ inv.days_overdue }}gg</span>
+          {% elif inv.days_until_due is not none and inv.days_until_due <= 7 %}
+            <span class="badge bg-warning text-dark ms-1">{{ inv.days_until_due }}gg</span>
+          {% endif %}
+        </td>
+        <td><span class="badge bg-{{ sl[1] }}">{{ sl[0] }}</span></td>
+        <td>
+          <a href="{{ url_for('payable_detail', iid=inv.id) }}" class="btn btn-sm btn-outline-success">
+            <i class="bi bi-check-lg me-1"></i> Paga
+          </a>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="card-footer bg-white text-end">
+      <a href="{{ url_for('payables') }}" class="small text-decoration-none">
+        Vedi tutti i pagamenti →
+      </a>
+    </div>
+    {% else %}
+      <p class="text-muted text-center p-4 mb-0">
+        🎉 Nessun pagamento da fare!
+        <a href="{{ url_for('new_payable') }}" class="ms-2">Registra una fattura passiva</a>
+      </p>
+    {% endif %}
   </div>
 </div>
 {% endblock %}

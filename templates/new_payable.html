@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Nuova fattura passiva – GestFatture{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('payables') }}" class="text-muted small text-decoration-none">
+  <i class="bi bi-arrow-left me-1"></i> Torna ai pagamenti
+</a>
+
+<h2 class="mt-2 mb-4"><i class="bi bi-credit-card me-2"></i>Registra fattura passiva</h2>
+
+<form method="post" class="card border-0 shadow-sm" style="max-width:780px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card-body">
+    <h5 class="mb-3">Fornitore</h5>
+    <div class="row g-3 mb-4">
+      <div class="col-12">
+        <label class="form-label fw-semibold">Scegli fornitore esistente</label>
+        <select name="supplier_id" class="form-select" id="supplierSelect"
+                onchange="document.getElementById('newSupplierBlock').style.display = this.value ? 'none' : 'block'">
+          <option value="">— oppure crea nuovo qui sotto —</option>
+          {% for s in suppliers %}
+          <option value="{{ s.id }}"
+            {% if request.args.get('supplier_id')|int == s.id %}selected{% endif %}>
+            {{ s.name }}{% if s.vat_number %} · P.IVA {{ s.vat_number }}{% endif %}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div id="newSupplierBlock" class="row g-3 mb-4"
+         style="{% if request.args.get('supplier_id') %}display:none{% endif %}">
+      <div class="col-12">
+        <div class="alert alert-info py-2 small mb-0">
+          O crea un nuovo fornitore al volo:
+        </div>
+      </div>
+      <div class="col-md-8">
+        <label class="form-label fw-semibold">Ragione sociale nuovo fornitore</label>
+        <input type="text" name="new_supplier_name" class="form-control"
+               placeholder="Es. ACME Forniture Srl">
+      </div>
+      <div class="col-md-4">
+        <label class="form-label fw-semibold">P.IVA nuovo fornitore</label>
+        <input type="text" name="new_supplier_vat" class="form-control"
+               placeholder="IT12345678901">
+      </div>
+    </div>
+
+    <hr>
+
+    <h5 class="mb-3">Dati fattura</h5>
+    <div class="row g-3">
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Numero fattura *</label>
+        <input type="text" name="number" class="form-control" required
+               placeholder="Es. 2026/123">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Importo totale (€) *</label>
+        <input type="text" name="amount" class="form-control" required
+               placeholder="0,00" pattern="[0-9]+([.,][0-9]{1,2})?">
+        <div class="form-text">Importo IVA inclusa.</div>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Data emissione</label>
+        <input type="date" name="issue_date" class="form-control"
+               value="{{ today_iso }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Data scadenza</label>
+        <input type="date" name="due_date" class="form-control"
+               value="{{ due_iso }}">
+        <div class="form-text">Default: 30 giorni dall'emissione.</div>
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Note (opzionale)</label>
+        <textarea name="notes" class="form-control" rows="2"
+                  placeholder="Es. Pagamento via bonifico SEPA, fornitura componenti meccanici…"></textarea>
+      </div>
+    </div>
+
+    <div class="mt-4 d-flex gap-2">
+      <button class="btn btn-primary">
+        <i class="bi bi-save me-1"></i> Registra fattura passiva
+      </button>
+      <a href="{{ url_for('payables') }}" class="btn btn-outline-secondary">Annulla</a>
+    </div>
+  </div>
+</form>
+{% endblock %}

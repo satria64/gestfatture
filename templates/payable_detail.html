@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Fattura passiva {{ invoice.number }} – GestFatture{% endblock %}
+
+{% block content %}
+{% set sl = invoice.status_label %}
+
+<a href="{{ url_for('payables') }}" class="text-muted small text-decoration-none">
+  <i class="bi bi-arrow-left me-1"></i> Torna ai pagamenti
+</a>
+
+<div class="d-flex justify-content-between align-items-start mt-2 mb-4 flex-wrap gap-2">
+  <div>
+    <h2 class="mb-1"><i class="bi bi-credit-card me-2"></i>Fattura passiva n. {{ invoice.number }}</h2>
+    <div class="d-flex gap-2 align-items-center mt-2 flex-wrap">
+      <span class="badge bg-{{ sl[1] }} fs-6">{{ sl[0] }}</span>
+      {% if invoice.status == 'overdue' %}
+        <span class="badge bg-danger fs-6">+{{ invoice.days_overdue }} giorni di ritardo</span>
+      {% elif invoice.status == 'pending' and invoice.days_until_due is not none %}
+        <span class="badge bg-warning text-dark fs-6">Scade in {{ invoice.days_until_due }} giorni</span>
+      {% endif %}
+      <span class="badge bg-light text-dark border fs-6">Da: {{ invoice.client.name }}</span>
+    </div>
+  </div>
+</div>
+
+<div class="row g-4">
+  <!-- Dettagli fattura -->
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">Dati fattura</div>
+      <div class="card-body">
+        <dl class="row mb-0">
+          <dt class="col-sm-4">Fornitore</dt>
+          <dd class="col-sm-8">
+            <a href="{{ url_for('supplier_detail', sid=invoice.client.id) }}">
+              {{ invoice.client.name }}
+            </a>
+            {% if invoice.client.vat_number %}<br><small class="text-muted">P.IVA {{ invoice.client.vat_number }}</small>{% endif %}
+          </dd>
+          {% if invoice.client.iban %}
+          <dt class="col-sm-4">IBAN fornitore</dt>
+          <dd class="col-sm-8"><code class="small">{{ invoice.client.iban }}</code></dd>
+          {% endif %}
+          <dt class="col-sm-4">Numero</dt>
+          <dd class="col-sm-8"><strong>{{ invoice.number }}</strong></dd>
+          <dt class="col-sm-4">Data emissione</dt>
+          <dd class="col-sm-8">{{ invoice.issue_date | it_date }}</dd>
+          <dt class="col-sm-4">Data scadenza</dt>
+          <dd class="col-sm-8">{{ invoice.due_date | it_date }}</dd>
+          <dt class="col-sm-4">Importo</dt>
+          <dd class="col-sm-8"><strong class="fs-4 text-danger">{{ invoice.amount | eur }}</strong></dd>
+          {% if invoice.notes %}
+          <dt class="col-sm-4">Note</dt>
+          <dd class="col-sm-8" style="white-space:pre-wrap">{{ invoice.notes }}</dd>
+          {% endif %}
+        </dl>
+      </div>
+    </div>
+
+    {% if invoice.status == 'paid' %}
+    <div class="card border-0 shadow-sm border-start border-success border-4">
+      <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+        <i class="bi bi-check-circle me-1"></i> Pagata
+      </div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-sm-4">Data pagamento</dt>
+          <dd class="col-sm-8">{{ invoice.payment_date | it_date if invoice.payment_date else '—' }}</dd>
+          <dt class="col-sm-4">Metodo</dt>
+          <dd class="col-sm-8">{{ invoice.payment_method or '—' }}</dd>
+          <dt class="col-sm-4">Riferimento</dt>
+          <dd class="col-sm-8"><code>{{ invoice.payment_ref or '—' }}</code></dd>
+        </dl>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Azioni -->
+  <div class="col-lg-5">
+    {% if invoice.status != 'paid' %}
+    <div class="card border-0 shadow-sm border-start border-success border-4">
+      <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+        <i class="bi bi-check-lg me-1"></i> Registra il pagamento
+      </div>
+      <div class="card-body">
+        <form method="post" action="{{ url_for('payable_mark_paid', iid=invoice.id) }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Data pagamento</label>
+            <input type="date" name="payment_date" class="form-control form-control-sm"
+                   value="{{ today_iso }}">
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Metodo</label>
+            <select name="payment_method" class="form-select form-select-sm">
+              <option value="bonifico">Bonifico bancario</option>
+              <option value="rid">RID / SDD</option>
+              <option value="bollettino">Bollettino postale</option>
+              <option value="contanti">Contanti</option>
+              <option value="carta">Carta di credito/debito</option>
+              <option value="assegno">Assegno</option>
+              <option value="compensazione">Compensazione</option>
+              <option value="altro">Altro</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label fw-semibold small">Riferimento (opzionale)</label>
+            <input type="text" name="payment_ref" class="form-control form-control-sm"
+                   placeholder="Es. CRO bonifico, n. assegno…">
+          </div>
+          <button class="btn btn-success w-100">
+            <i class="bi bi-check-lg me-1"></i> Segna come pagata
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="mt-3 text-end">
+      <form method="post" action="{{ url_for('payable_delete', iid=invoice.id) }}"
+            onsubmit="return confirm('Eliminare questa fattura passiva?')" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-outline-danger btn-sm">
+          <i class="bi bi-trash me-1"></i> Elimina
+        </button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

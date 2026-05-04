@@ -73,6 +73,9 @@ class Client(db.Model):
     address      = db.Column(db.String(500), default="")
     vat_number   = db.Column(db.String(50),  default="")
     credit_score = db.Column(db.Float, default=100.0)
+    # Flag dual-role: un'anagrafica può essere cliente, fornitore, o entrambi
+    is_supplier  = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    iban         = db.Column(db.String(40), default="")  # utile per fornitori (per fare bonifici)
     created_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
     invoices = db.relationship("Invoice", back_populates="client", cascade="all, delete-orphan")
@@ -129,6 +132,9 @@ class Invoice(db.Model):
     payment_link       = db.Column(db.String(500), default="")
     # Stripe payment_intent_id o PayPal order_id per matching automatico
     payment_ref        = db.Column(db.String(200), default="")
+    payment_method     = db.Column(db.String(40), default="")  # bonifico/contanti/carta/rid/altro
+    # Direzione: False = fattura attiva (emessa); True = passiva (ricevuta da fornitore)
+    is_passive         = db.Column(db.Boolean, default=False, nullable=False, index=True)
     pdf_filename       = db.Column(db.String(255), default="")
     user_notified_at   = db.Column(db.DateTime, nullable=True)  # quando è stato notificato il titolare di scadenza
     notes              = db.Column(db.Text, default="")

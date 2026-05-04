@@ -70,6 +70,18 @@
         </a>
       </li>
       <li>
+        <a href="{{ url_for('suppliers') }}"
+           class="nav-link text-white {% if 'supplier' in (request.endpoint or '') %}active{% endif %}">
+          <i class="bi bi-truck me-2"></i> Fornitori
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('payables') }}"
+           class="nav-link text-white {% if 'payable' in (request.endpoint or '') %}active{% endif %}">
+          <i class="bi bi-credit-card me-2"></i> Pagamenti
+        </a>
+      </li>
+      <li>
         <a href="{{ url_for('pec_inbox') }}"
            class="nav-link text-white {% if 'pec' in (request.endpoint or '') %}active{% endif %}">
           <i class="bi bi-bank me-2"></i> PEC Istituzionali
