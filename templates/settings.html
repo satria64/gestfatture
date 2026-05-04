@@ -338,6 +338,45 @@
           <em>la tua azienda</em> come cliente invece che il fornitore.
         </div>
       </div>
+
+      <hr class="my-3">
+      <div class="small text-muted mb-2">
+        <i class="bi bi-cash-coin me-1"></i> <strong>Per i bandi di finanziamento</strong>
+        — più informazioni dai, più precisi sono i suggerimenti AI.
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Codice ATECO</label>
+          <input type="text" name="user_ateco_code" class="form-control"
+                 value="{{ user_ateco_code }}" placeholder="45.20.10" maxlength="20">
+          <div class="form-text">Es. <code>45.20.10</code> per officine meccaniche.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Regione</label>
+          <select name="user_region" class="form-select">
+            <option value="">— scegli —</option>
+            {% for r in ["Italia","Abruzzo","Basilicata","Calabria","Campania","Emilia-Romagna","Friuli-Venezia Giulia","Lazio","Liguria","Lombardia","Marche","Molise","Piemonte","Puglia","Sardegna","Sicilia","Toscana","Trentino-Alto Adige","Umbria","Valle d'Aosta","Veneto"] %}
+              <option value="{{ r }}" {% if user_region == r %}selected{% endif %}>{{ r }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Dimensione azienda</label>
+          <select name="user_company_size" class="form-select">
+            <option value="">— scegli —</option>
+            <option value="micro" {% if user_company_size == 'micro' %}selected{% endif %}>Microimpresa (&lt;10 dipendenti, &lt;€2M)</option>
+            <option value="pmi"   {% if user_company_size == 'pmi' %}selected{% endif %}>PMI (&lt;250 dipendenti, &lt;€50M)</option>
+            <option value="grande" {% if user_company_size == 'grande' %}selected{% endif %}>Grande impresa</option>
+          </select>
+        </div>
+        <div class="col-12">
+          <label class="form-label fw-semibold">Descrizione attività</label>
+          <textarea name="user_business_description" class="form-control" rows="3"
+                    maxlength="1000" placeholder="Officina meccanica per riparazione e manutenzione di autoveicoli. Servizi: tagliandi, freni, climatizzazione, diagnostica.">{{ user_business_description }}</textarea>
+          <div class="form-text">2-3 frasi sulla tua attività. L'AI usa questa descrizione per matchare i bandi rilevanti.</div>
+        </div>
+      </div>
+
       <button type="submit" class="btn btn-primary mt-3">
         <i class="bi bi-save me-1"></i> Aggiorna profilo
       </button>

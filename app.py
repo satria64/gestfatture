@@ -13,7 +13,8 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
-                    User, PecMessage, SupportTicket, TicketMessage, AuditLog)
+                    User, PecMessage, SupportTicket, TicketMessage, AuditLog,
+                    Bando, BandoMatch)
 from auth import login_manager
 from config import config
 
@@ -539,6 +540,112 @@ def create_app():
             mimetype="application/zip",
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # BANDI di finanziamento
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/bandi")
+    @login_required
+    def bandi_list():
+        """Lista bandi con score di rilevanza personalizzato per current_user."""
+        # Filtri
+        f_min_score = int(request.args.get("min_score", 30))
+        f_show_dismissed = request.args.get("show_dismissed") == "1"
+        f_only_saved = request.args.get("only_saved") == "1"
+
+        q = (db.session.query(Bando, BandoMatch)
+             .outerjoin(BandoMatch,
+                        (BandoMatch.bando_id == Bando.id) &
+                        (BandoMatch.user_id == current_user.id))
+             .filter(Bando.is_active.is_(True)))
+        if f_only_saved:
+            q = q.filter(BandoMatch.is_saved.is_(True))
+        if not f_show_dismissed:
+            q = q.filter((BandoMatch.is_dismissed.is_(None)) |
+                         (BandoMatch.is_dismissed.is_(False)))
+        rows = q.all()
+        # Filtro per score (in Python perché match potrebbe essere None)
+        rows = [(b, m) for b, m in rows
+                if (m.relevance_score if m else 0) >= f_min_score or f_only_saved]
+        # Ordina per relevance score desc, poi deadline asc
+        rows.sort(key=lambda x: (-(x[1].relevance_score if x[1] else 0),
+                                 x[0].deadline or date(2099, 12, 31)))
+
+        # Profilo completato?
+        profile_complete = bool(
+            UserSetting.get(current_user.id, "user_ateco_code") or
+            UserSetting.get(current_user.id, "user_business_description")
+        )
+        return render_template("bandi_list.html",
+                               rows=rows,
+                               min_score=f_min_score,
+                               show_dismissed=f_show_dismissed,
+                               only_saved=f_only_saved,
+                               profile_complete=profile_complete)
+
+    @app.route("/bandi/<int:bid>")
+    @login_required
+    def bando_detail(bid):
+        b = Bando.query.get_or_404(bid)
+        m = BandoMatch.query.filter_by(user_id=current_user.id, bando_id=bid).first()
+        return render_template("bando_detail.html", bando=b, match=m)
+
+    @app.route("/bandi/<int:bid>/save", methods=["POST"])
+    @login_required
+    def bando_save(bid):
+        b = Bando.query.get_or_404(bid)
+        m = BandoMatch.query.filter_by(user_id=current_user.id, bando_id=bid).first()
+        if not m:
+            m = BandoMatch(user_id=current_user.id, bando_id=bid)
+            db.session.add(m)
+        m.is_saved = not m.is_saved
+        if m.is_saved:
+            m.is_dismissed = False
+        db.session.commit()
+        flash("✅ Salvato nei preferiti." if m.is_saved else "Rimosso dai preferiti.", "success")
+        return redirect(request.referrer or url_for("bando_detail", bid=bid))
+
+    @app.route("/bandi/<int:bid>/dismiss", methods=["POST"])
+    @login_required
+    def bando_dismiss(bid):
+        b = Bando.query.get_or_404(bid)
+        m = BandoMatch.query.filter_by(user_id=current_user.id, bando_id=bid).first()
+        if not m:
+            m = BandoMatch(user_id=current_user.id, bando_id=bid)
+            db.session.add(m)
+        m.is_dismissed = True
+        m.is_saved = False
+        db.session.commit()
+        flash("Bando nascosto.", "info")
+        return redirect(url_for("bandi_list"))
+
+    @app.route("/bandi/sync-now", methods=["POST"])
+    @admin_required
+    def bandi_sync_now():
+        """Forza sync bandi (solo admin). Esegue scraping + matching per current_user."""
+        api_key = AppSettings.get("anthropic_api_key", "")
+        if not api_key:
+            flash("Configura prima la API key Anthropic nelle Impostazioni.", "danger")
+            return redirect(url_for("bandi_list"))
+        from bandi_service import sync_all_sources, compute_matches_for_user
+        from claude_service import DEFAULT_MODEL
+        scrape_model = AppSettings.get("anthropic_model") or DEFAULT_MODEL
+        try:
+            stats = sync_all_sources(db, api_key, scrape_model)
+            user = current_user._get_current_object()
+            n_matches = compute_matches_for_user(
+                db, user, api_key, model="claude-haiku-4-5-20251001"
+            )
+            flash(
+                f"✅ Sync completato: {stats['new']} nuovi bandi, "
+                f"{stats['updated']} aggiornati, {stats['errors']} errori. "
+                f"Match aggiornati per te: {n_matches}.",
+                "success",
+            )
+        except Exception as e:
+            logging.exception("Sync bandi fallito")
+            flash(f"❌ Errore sync bandi: {e}", "danger")
+        return redirect(url_for("bandi_list"))
 
     # ── Customer portal pubblico (link firmato, no login) ────────────────────
     @app.route("/portal/<token>")
@@ -1532,6 +1639,15 @@ def create_app():
         db.session.commit()
         my_vat = "".join(c for c in request.form.get("my_vat_number", "") if c.isdigit())
         UserSetting.set(current_user.id, "my_vat_number", my_vat)
+        # Profilo per matching bandi
+        UserSetting.set(current_user.id, "user_ateco_code",
+                        request.form.get("user_ateco_code", "").strip()[:20])
+        UserSetting.set(current_user.id, "user_region",
+                        request.form.get("user_region", "").strip()[:80])
+        UserSetting.set(current_user.id, "user_company_size",
+                        request.form.get("user_company_size", "").strip()[:40])
+        UserSetting.set(current_user.id, "user_business_description",
+                        request.form.get("user_business_description", "").strip()[:1000])
         audit("profile_update", target=f"user:{current_user.username}")
         flash("Profilo aggiornato.", "success")
         return redirect(url_for("settings"))
@@ -1614,11 +1730,15 @@ def create_app():
             for k in admin_keys:
                 current[k] = AppSettings.get(k)
 
-        # Preferenze notifiche + P.IVA personale
+        # Preferenze notifiche + P.IVA personale + profilo bandi
         notify_email    = UserSetting.get(current_user.id, "notify_email_enabled")
         notify_whatsapp = UserSetting.get(current_user.id, "notify_whatsapp_enabled")
         whatsapp_apikey = UserSetting.get(current_user.id, "whatsapp_apikey")
         my_vat_number   = UserSetting.get(current_user.id, "my_vat_number")
+        ateco_code      = UserSetting.get(current_user.id, "user_ateco_code")
+        user_region     = UserSetting.get(current_user.id, "user_region")
+        company_size    = UserSetting.get(current_user.id, "user_company_size")
+        business_desc   = UserSetting.get(current_user.id, "user_business_description")
 
         return render_template("settings.html",
             settings=current,
@@ -1626,6 +1746,10 @@ def create_app():
             user_notify_whatsapp=notify_whatsapp,
             user_whatsapp_apikey=whatsapp_apikey,
             user_my_vat_number=my_vat_number,
+            user_ateco_code=ateco_code,
+            user_region=user_region,
+            user_company_size=company_size,
+            user_business_description=business_desc,
         )
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2107,6 +2231,13 @@ def create_app():
             SupportTicket.status.in_(["open", "in_progress", "waiting_user"])
         ).count()
 
+        # ── Bandi ───────────────────────────────────────────────────────────
+        bandi_total  = Bando.query.filter_by(is_active=True).count()
+        bandi_new_7d = Bando.query.filter(Bando.created_at >= d7).count()
+        last_bando   = (Bando.query.filter_by(is_active=True)
+                        .order_by(Bando.last_seen_at.desc()).first())
+        bandi_last_sync = last_bando.last_seen_at if last_bando else None
+
         return render_template("admin_metrics.html",
             users_all=users_all, users_admin=users_admin, users_guest=users_guest,
             users_real=users_real, users_new_7d=users_new_7d,
@@ -2120,6 +2251,8 @@ def create_app():
             top_actions=top_actions,
             integration_errors=integration_errors,
             tickets_open=tickets_open,
+            bandi_total=bandi_total, bandi_new_7d=bandi_new_7d,
+            bandi_last_sync=bandi_last_sync,
         )
 
     @app.route("/admin/audit-log")

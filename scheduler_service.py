@@ -129,6 +129,41 @@ def _wrap_integration_sync(app, module_name: str):
     return runner
 
 
+def run_bandi_sync(app):
+    """Job giornaliero: scraping bandi + matching per ogni utente reale.
+    Chiamato dallo scheduler alle 06:00 (prima del job solleciti).
+    """
+    with app.app_context():
+        from models import db, AppSettings, User
+        from bandi_service import sync_all_sources, compute_matches_for_user
+        from claude_service import DEFAULT_MODEL
+
+        api_key = AppSettings.get("anthropic_api_key", "")
+        if not api_key:
+            log.info("Bandi sync saltato: API key Anthropic non configurata")
+            return
+
+        scrape_model = AppSettings.get("anthropic_model") or DEFAULT_MODEL
+        try:
+            stats = sync_all_sources(db, api_key, scrape_model)
+            log.info("Bandi sync: nuovi=%d aggiornati=%d errori=%d",
+                     stats["new"], stats["updated"], stats["errors"])
+        except Exception as e:
+            log.error("Bandi scraping globale fallito: %s", e, exc_info=True)
+            return
+
+        # Matching per ogni utente reale (non ospite)
+        users = User.query.filter(~User.username.like("ospite_%")).all()
+        for u in users:
+            try:
+                n = compute_matches_for_user(
+                    db, u, api_key, model="claude-haiku-4-5-20251001"
+                )
+                log.info("Bandi matching per u=%s: %d match aggiornati", u.username, n)
+            except Exception as e:
+                log.error("Matching bandi fallito per u=%s: %s", u.username, e)
+
+
 def start_scheduler(app):
     global _scheduler
     _scheduler = BackgroundScheduler(timezone="Europe/Rome")
@@ -172,8 +207,19 @@ def start_scheduler(app):
         coalesce=True,
     )
 
+    # Bandi sync giornaliero alle 06:00 (prima del job solleciti)
+    _scheduler.add_job(
+        func=run_bandi_sync,
+        args=[app],
+        trigger=CronTrigger(hour=6, minute=0),
+        id="bandi_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
-    log.info("Scheduler avviato – solleciti 08:00 + integrazioni (folder 30s, PEC 5min, FiC 30min)")
+    log.info("Scheduler avviato – solleciti 08:00, bandi 06:00, integrazioni (folder 30s, PEC 5min, FiC 30min)")
     return _scheduler
 
 

@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Bandi di finanziamento – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+  <div>
+    <h2 class="mb-1"><i class="bi bi-cash-coin me-2"></i> Bandi di finanziamento</h2>
+    <p class="text-muted small mb-0">
+      Bandi attivi (contributi, agevolazioni, crediti d'imposta) con punteggio di
+      rilevanza calcolato dall'AI sul tuo profilo.
+    </p>
+  </div>
+  {% if current_user.is_admin %}
+  <form action="{{ url_for('bandi_sync_now') }}" method="post"
+        onsubmit="this.querySelector('button').disabled=true; this.querySelector('button').innerText='Sync in corso...'">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-outline-primary btn-sm">
+      <i class="bi bi-arrow-clockwise me-1"></i> Sync ora
+    </button>
+  </form>
+  {% endif %}
+</div>
+
+{% if not profile_complete %}
+<div class="alert alert-warning d-flex align-items-start gap-2">
+  <i class="bi bi-exclamation-triangle fs-4"></i>
+  <div>
+    <strong>Profilo incompleto</strong>: senza codice ATECO o descrizione attività
+    il matching AI non può funzionare bene.
+    Vai su <a href="{{ url_for('settings') }}#mio-profilo">Impostazioni → Mio profilo</a>
+    e compila i campi "Per i bandi di finanziamento".
+  </div>
+</div>
+{% endif %}
+
+<!-- Filtri -->
+<form method="get" class="card border-0 shadow-sm mb-3">
+  <div class="card-body p-3">
+    <div class="row g-2 align-items-end">
+      <div class="col-md-3">
+        <label class="form-label small fw-semibold mb-1">Score minimo</label>
+        <select name="min_score" class="form-select form-select-sm" onchange="this.form.submit()">
+          <option value="0"   {% if min_score == 0  %}selected{% endif %}>Tutti</option>
+          <option value="30"  {% if min_score == 30 %}selected{% endif %}>≥ 30 (default)</option>
+          <option value="50"  {% if min_score == 50 %}selected{% endif %}>≥ 50 (medi+)</option>
+          <option value="75"  {% if min_score == 75 %}selected{% endif %}>≥ 75 (solo alti)</option>
+        </select>
+      </div>
+      <div class="col-md-3">
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" name="only_saved" id="only_saved"
+                 value="1" onchange="this.form.submit()" {% if only_saved %}checked{% endif %}>
+          <label class="form-check-label small" for="only_saved">Solo preferiti</label>
+        </div>
+      </div>
+      <div class="col-md-3">
+        <div class="form-check mt-3">
+          <input class="form-check-input" type="checkbox" name="show_dismissed" id="show_dismissed"
+                 value="1" onchange="this.form.submit()" {% if show_dismissed %}checked{% endif %}>
+          <label class="form-check-label small" for="show_dismissed">Mostra nascosti</label>
+        </div>
+      </div>
+      <div class="col-md-3 text-end">
+        <span class="text-muted small">{{ rows|length }} bandi</span>
+      </div>
+    </div>
+  </div>
+</form>
+
+{% if rows %}
+<div class="row g-3">
+  {% for b, m in rows %}
+  {% set rl = m.relevance_label if m else ('?', 'secondary') %}
+  {% set dl = b.deadline_label %}
+  <div class="col-12">
+    <div class="card border-0 shadow-sm h-100 {% if m and m.is_saved %}border-start border-warning border-4{% endif %}">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start gap-3 flex-wrap">
+          <div class="flex-grow-1" style="min-width:0">
+            <div class="d-flex gap-2 align-items-center mb-1 flex-wrap">
+              {% if m %}
+              <span class="badge bg-{{ rl[1] }}">
+                Rilevanza {{ rl[0] }} · {{ m.relevance_score }}/100
+              </span>
+              {% endif %}
+              <span class="badge bg-light text-dark border">{{ b.ente or '?' }}</span>
+              <span class="badge bg-light text-dark border">{{ b.region or 'Italia' }}</span>
+              {% if b.category %}<span class="badge bg-info-subtle text-info-emphasis border">{{ b.category }}</span>{% endif %}
+              <span class="badge bg-{{ dl[1] }}">⏰ {{ dl[0] }}</span>
+              {% if m and m.is_saved %}
+                <span class="badge bg-warning text-dark"><i class="bi bi-star-fill"></i></span>
+              {% endif %}
+            </div>
+            <h5 class="mb-1">
+              <a href="{{ url_for('bando_detail', bid=b.id) }}" class="text-decoration-none">
+                {{ b.title }}
+              </a>
+            </h5>
+            <p class="text-muted small mb-1">{{ b.description[:300] }}{% if b.description and b.description|length > 300 %}…{% endif %}</p>
+            {% if m and m.reason %}
+              <p class="small text-{{ rl[1] }} mb-0">
+                <i class="bi bi-lightbulb me-1"></i> <em>AI: {{ m.reason }}</em>
+              </p>
+            {% endif %}
+          </div>
+          <div class="d-flex flex-column gap-1" style="min-width:180px">
+            {% if b.amount_max %}
+              <div class="text-end small text-muted">Fino a</div>
+              <div class="text-end fs-5 fw-bold text-success">{{ b.amount_max | eur }}</div>
+            {% endif %}
+            {% if b.deadline %}
+              <div class="text-end small text-muted">Scade il {{ b.deadline.strftime('%d/%m/%Y') }}</div>
+            {% endif %}
+            <div class="d-flex gap-1 mt-2 justify-content-end">
+              {% if b.url %}
+                <a href="{{ b.url }}" class="btn btn-outline-secondary btn-sm" target="_blank" rel="noopener" title="Apri bando ufficiale">
+                  <i class="bi bi-box-arrow-up-right"></i>
+                </a>
+              {% endif %}
+              <form action="{{ url_for('bando_save', bid=b.id) }}" method="post" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm {% if m and m.is_saved %}btn-warning{% else %}btn-outline-warning{% endif %}"
+                        title="{% if m and m.is_saved %}Rimuovi dai preferiti{% else %}Aggiungi ai preferiti{% endif %}">
+                  <i class="bi bi-star{% if m and m.is_saved %}-fill{% endif %}"></i>
+                </button>
+              </form>
+              <form action="{{ url_for('bando_dismiss', bid=b.id) }}" method="post" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-secondary" title="Nascondi">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="text-center text-muted py-5">
+  <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+  <p>Nessun bando trovato con questi filtri.</p>
+  {% if current_user.is_admin %}
+    <p class="small">Hai mai eseguito il sync? Click <strong>"Sync ora"</strong> in alto.</p>
+  {% else %}
+    <p class="small">Riprova fra qualche ora — il sync gira automaticamente ogni giorno alle 06:00.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

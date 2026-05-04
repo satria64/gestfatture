@@ -57,6 +57,12 @@
         </a>
       </li>
       <li>
+        <a href="{{ url_for('bandi_list') }}"
+           class="nav-link text-white {% if 'band' in (request.endpoint or '') %}active{% endif %}">
+          <i class="bi bi-cash-coin me-2"></i> Bandi
+        </a>
+      </li>
+      <li>
         <a href="{{ url_for('tickets') }}"
            class="nav-link text-white {% if 'ticket' in (request.endpoint or '') %}active{% endif %}">
           <i class="bi bi-life-preserver me-2"></i> Assistenza

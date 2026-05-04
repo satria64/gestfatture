@@ -125,6 +125,37 @@
   </div>
 </div>
 
+<!-- Riga 4: bandi -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <h6 class="text-uppercase text-muted small mb-2">Bandi di finanziamento</h6>
+  </div>
+  <div class="col-6 col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ bandi_total }}</div>
+      <div class="small text-muted">Bandi attivi</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-success">+{{ bandi_new_7d }}</div>
+      <div class="small text-muted">Nuovi 7gg</div>
+    </div>
+  </div>
+  <div class="col-12 col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-6 fw-semibold">
+        {% if bandi_last_sync %}
+          {{ bandi_last_sync.strftime('%d/%m/%Y %H:%M') }}
+        {% else %}
+          mai
+        {% endif %}
+      </div>
+      <div class="small text-muted">Ultimo sync bandi</div>
+    </div>
+  </div>
+</div>
+
 <!-- Top azioni 7gg -->
 <div class="row g-3 mb-4">
   <div class="col-md-6">

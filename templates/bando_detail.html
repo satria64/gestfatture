@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}{{ bando.title[:60] }} – Bandi{% endblock %}
+
+{% block content %}
+{% set rl = match.relevance_label if match else ('?', 'secondary') %}
+{% set dl = bando.deadline_label %}
+
+<a href="{{ url_for('bandi_list') }}" class="text-muted small text-decoration-none">
+  <i class="bi bi-arrow-left me-1"></i> Torna ai bandi
+</a>
+
+<div class="d-flex justify-content-between align-items-start mt-2 mb-4 flex-wrap gap-2">
+  <div>
+    <h2 class="mb-2">{{ bando.title }}</h2>
+    <div class="d-flex gap-2 flex-wrap">
+      {% if match %}
+        <span class="badge bg-{{ rl[1] }} fs-6">
+          Rilevanza {{ rl[0] }} · {{ match.relevance_score }}/100
+        </span>
+      {% endif %}
+      <span class="badge bg-light text-dark border fs-6">{{ bando.ente or '?' }}</span>
+      <span class="badge bg-light text-dark border fs-6">{{ bando.region or 'Italia' }}</span>
+      {% if bando.category %}
+        <span class="badge bg-info-subtle text-info-emphasis border fs-6">{{ bando.category }}</span>
+      {% endif %}
+      <span class="badge bg-{{ dl[1] }} fs-6">⏰ {{ dl[0] }}</span>
+    </div>
+  </div>
+  <div class="d-flex gap-2">
+    <form action="{{ url_for('bando_save', bid=bando.id) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn {% if match and match.is_saved %}btn-warning{% else %}btn-outline-warning{% endif %}">
+        <i class="bi bi-star{% if match and match.is_saved %}-fill{% endif %} me-1"></i>
+        {% if match and match.is_saved %}Salvato{% else %}Salva{% endif %}
+      </button>
+    </form>
+    <form action="{{ url_for('bando_dismiss', bid=bando.id) }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-secondary">
+        <i class="bi bi-x-lg me-1"></i> Nascondi
+      </button>
+    </form>
+    {% if bando.url %}
+    <a href="{{ bando.url }}" class="btn btn-primary" target="_blank" rel="noopener">
+      <i class="bi bi-box-arrow-up-right me-1"></i> Apri bando ufficiale
+    </a>
+    {% endif %}
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    {% if match and match.reason %}
+    <div class="card border-0 shadow-sm mb-4 border-start border-{{ rl[1] }} border-4">
+      <div class="card-header fw-semibold bg-{{ rl[1] }}-subtle">
+        <i class="bi bi-stars me-1"></i> Perché ti è stato suggerito
+      </div>
+      <div class="card-body">
+        {{ match.reason }}
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-info-circle me-1"></i> Descrizione
+      </div>
+      <div class="card-body">
+        <p class="mb-0" style="white-space:pre-wrap">{{ bando.description or '—' }}</p>
+      </div>
+    </div>
+
+    {% if bando.requirements %}
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-list-check me-1"></i> Requisiti
+      </div>
+      <div class="card-body">
+        <p class="mb-0" style="white-space:pre-wrap">{{ bando.requirements }}</p>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card border-0 shadow-sm mb-4">
+      <div class="card-header fw-semibold">Dettagli</div>
+      <div class="card-body">
+        <dl class="row mb-0 small">
+          <dt class="col-5">Ente</dt>
+          <dd class="col-7">{{ bando.ente or '—' }}</dd>
+          <dt class="col-5">Regione</dt>
+          <dd class="col-7">{{ bando.region or 'Italia' }}</dd>
+          <dt class="col-5">Categoria</dt>
+          <dd class="col-7">{{ bando.category or '—' }}</dd>
+          <dt class="col-5">Target</dt>
+          <dd class="col-7">{{ bando.target_size or 'all' }}</dd>
+          {% if bando.amount_max %}
+          <dt class="col-5">Importo max</dt>
+          <dd class="col-7 fw-semibold text-success">{{ bando.amount_max | eur }}</dd>
+          {% endif %}
+          {% if bando.deadline %}
+          <dt class="col-5">Scadenza</dt>
+          <dd class="col-7">{{ bando.deadline.strftime('%d/%m/%Y') }}</dd>
+          {% endif %}
+          <dt class="col-5">Fonte</dt>
+          <dd class="col-7"><code class="small">{{ bando.source }}</code></dd>
+          <dt class="col-5">Aggiornato</dt>
+          <dd class="col-7 small text-muted">
+            {{ bando.last_seen_at.strftime('%d/%m/%Y %H:%M') if bando.last_seen_at else '—' }}
+          </dd>
+        </dl>
+      </div>
+    </div>
+
+    {% if bando.ateco_hints_list %}
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">Settori target</div>
+      <div class="card-body">
+        {% for h in bando.ateco_hints_list %}
+          <span class="badge bg-light text-dark border me-1 mb-1">{{ h }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="alert alert-info small mt-4 mb-0">
+  <i class="bi bi-info-circle me-1"></i>
+  I dati di questo bando sono stati estratti automaticamente dal portale dell'ente.
+  Per partecipare segui SEMPRE il bando ufficiale (link "Apri bando ufficiale" in alto).
+  GestFatture non è responsabile di errori di estrazione o cambi di scadenza.
+</div>
+{% endblock %}

@@ -181,6 +181,9 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - Aggiungere `SENTRY_DSN` come env var su Render se si vuole l'error tracking
 - Considerare revisione legale di `templates/privacy.html` e `templates/terms.html` prima della pubblicazione effettiva
 
+### Bandi di finanziamento
+- [x] **Bandi MVP** — scraping AI da MIMIT/Invitalia (estensibile), matching AI personalizzato sul profilo utente (ATECO/regione/dimensione/descrizione), lista filtrabile per score, save/dismiss, sync giornaliero alle 06:00. Sezione "Mio profilo" estesa con campi per matching.
+
 ### Nice to have
 - [x] **Dashboard admin con metriche di sistema** (utenti, fatture, attività, errori) → `/admin/metrics`
 - [x] **Resend** come alternativa SMTP (provider configurabile in Impostazioni admin, fallback automatico)

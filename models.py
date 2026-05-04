@@ -422,6 +422,91 @@ class PecMessage(db.Model):
             return []
 
 
+class Bando(db.Model):
+    """Bando di finanziamento (contributo, agevolazione, credito d'imposta)
+    aggregato dagli scraper. Globale: un singolo Bando può essere visto da
+    più utenti (matching personalizzato in BandoMatch).
+    """
+    __tablename__ = "bandi"
+    __table_args__ = (db.UniqueConstraint("source", "external_id", name="uq_bando_source"),)
+
+    id            = db.Column(db.Integer, primary_key=True)
+    source        = db.Column(db.String(80), index=True)            # "retecamerale", "mimit", "regione_lombardia" …
+    external_id   = db.Column(db.String(200))                        # ID/URL univoco nella fonte
+    title         = db.Column(db.String(500), nullable=False)
+    ente          = db.Column(db.String(255))                        # ente erogatore (es. "Camera di Commercio Milano", "MIMIT")
+    region        = db.Column(db.String(80), index=True)             # "Italia", "Lombardia", "Lazio" …
+    category      = db.Column(db.String(120))                        # "innovazione", "internazionalizzazione", "digitalizzazione" …
+    deadline      = db.Column(db.Date, nullable=True, index=True)
+    amount_max    = db.Column(db.Float, nullable=True)               # importo massimo del contributo (€)
+    description   = db.Column(db.Text)                               # 2-4 frasi sintetiche
+    requirements  = db.Column(db.Text)                               # requisiti riassunti
+    target_size   = db.Column(db.String(40), default="all")          # micro / pmi / all
+    ateco_hints   = db.Column(db.Text, default="[]")                 # JSON list di codici ATECO/keyword settori
+    url           = db.Column(db.String(800))                        # link al bando ufficiale
+    is_active     = db.Column(db.Boolean, default=True, nullable=False)
+    last_seen_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at    = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    matches = db.relationship("BandoMatch", back_populates="bando",
+                              cascade="all, delete-orphan")
+
+    @property
+    def days_until_deadline(self):
+        if not self.deadline:
+            return None
+        return (self.deadline - date.today()).days
+
+    @property
+    def deadline_label(self):
+        d = self.days_until_deadline
+        if d is None:
+            return ("aperto", "secondary")
+        if d < 0:
+            return ("scaduto", "secondary")
+        if d <= 7:
+            return (f"{d}gg", "danger")
+        if d <= 30:
+            return (f"{d}gg", "warning")
+        return (f"{d}gg", "success")
+
+    @property
+    def ateco_hints_list(self) -> list:
+        import json
+        try:
+            return json.loads(self.ateco_hints or "[]")
+        except Exception:
+            return []
+
+
+class BandoMatch(db.Model):
+    """Rilevanza personalizzata di un Bando per un singolo utente.
+    Calcolato dall'AI sulla base del profilo utente (ATECO, regione, descrizione)."""
+    __tablename__ = "bando_matches"
+    __table_args__ = (db.UniqueConstraint("user_id", "bando_id", name="uq_user_bando"),)
+
+    id              = db.Column(db.Integer, primary_key=True)
+    user_id         = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    bando_id        = db.Column(db.Integer, db.ForeignKey("bandi.id"), nullable=False, index=True)
+    relevance_score = db.Column(db.Integer, default=0)               # 0-100
+    reason          = db.Column(db.Text)                             # spiegazione AI (1-2 frasi)
+    is_saved        = db.Column(db.Boolean, default=False)           # utente ha messo "preferito"
+    is_dismissed    = db.Column(db.Boolean, default=False)           # utente ha nascosto
+    notified_at     = db.Column(db.DateTime, nullable=True)
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+
+    bando = db.relationship("Bando", back_populates="matches")
+
+    @property
+    def relevance_label(self):
+        s = self.relevance_score or 0
+        if s >= 75:
+            return ("Alta", "success")
+        if s >= 40:
+            return ("Media", "primary")
+        return ("Bassa", "secondary")
+
+
 class AppSettings(db.Model):
     __tablename__ = "app_settings"
 
