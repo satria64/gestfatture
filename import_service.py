@@ -485,6 +485,45 @@ def extract_invoice_data(text: str) -> dict:
     return data
 
 
+# Parole chiave tipiche di una fattura italiana (per euristica fallback regex)
+_INVOICE_KEYWORDS = [
+    "fattura", "parcella", "nota di credito", "nota di debito",
+    "imponibile", "iva", "totale documento", "totale da pagare",
+    "p.iva", "partita iva", "cessionario", "committente", "cedente",
+    "destinatario", "spettabile", "spett.", "codice fiscale",
+    "td01", "td04", "td05", "td06",
+]
+
+
+def _looks_like_invoice_text(text: str) -> tuple[bool, list[str]]:
+    """Euristica: il testo estratto sembra quello di una fattura italiana?
+
+    Restituisce (probabilmente_fattura, parole_chiave_trovate).
+    Soglia: almeno 3 keyword distinte presenti nel testo (case-insensitive).
+    """
+    if not text:
+        return False, []
+    low = text.lower()
+    found = [k for k in _INVOICE_KEYWORDS if k in low]
+    return len(found) >= 3, found
+
+
+def _has_minimum_invoice_fields(data: dict) -> bool:
+    """Controlla che almeno 2 dei 3 campi essenziali siano presenti e plausibili.
+
+    Campi essenziali: amount valido (>0 e <10M), vat_number cliente, number fattura.
+    Se ne abbiamo solo 0 o 1, probabilmente non è una fattura davvero o è tutto
+    spazzatura.
+    """
+    valid_amount = (
+        isinstance(data.get("amount"), (int, float))
+        and 0 < float(data["amount"]) < 10_000_000
+    )
+    valid_vat    = bool(data.get("vat_number"))
+    valid_number = bool((data.get("number") or "").strip())
+    return sum([valid_amount, valid_vat, valid_number]) >= 2
+
+
 def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
                        user_id: int = None) -> tuple[int, int, list[str]]:
     """
@@ -517,6 +556,13 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
             )
             extraction_method = "claude"
             log.info("PDF '%s' estratto via Claude API", filename)
+            # Filtro Claude: il documento NON è una fattura italiana
+            if data.get("is_invoice") is False:
+                guess = data.get("doc_type_guess") or "documento generico"
+                return 0, 1, [
+                    f"{filename}: il file non sembra una fattura "
+                    f"(rilevato come '{guess}'). Saltato."
+                ]
         except Exception as e:
             log.warning("Claude API fallita per '%s': %s — uso regex", filename, e)
 
@@ -527,6 +573,13 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
             return 0, 1, [
                 f"{filename}: PDF illeggibile (forse scansione). "
                 "Configura Anthropic API key per leggere anche scansioni."
+            ]
+        # Euristica: il testo contiene abbastanza keyword di una fattura italiana?
+        looks_invoice, _kw = _looks_like_invoice_text(text)
+        if not looks_invoice:
+            return 0, 1, [
+                f"{filename}: il file non sembra una fattura italiana "
+                "(mancano i termini tipici). Saltato."
             ]
         data = extract_invoice_data(text)
 
@@ -544,6 +597,13 @@ def process_pdf_import(file_bytes: bytes, filename: str, db, upload_folder: str,
                     data["vat_number"] = others[0]
                     data["client_name"] = "(VERIFICA: probabile fornitore - rilevata fattura passiva)"
                     data["_passive_warning"] = True
+
+    # ── Validazione finale: il PDF ha almeno i campi minimi di una fattura? ──
+    if not _has_minimum_invoice_fields(data):
+        return 0, 1, [
+            f"{filename}: estrazione incompleta — mancano almeno 2 tra "
+            "numero fattura, importo plausibile o P.IVA cliente. Saltato."
+        ]
 
     # Defaults se mancano
     base = filename.rsplit(".", 1)[0]

@@ -38,6 +38,7 @@
 - [x] Manuale form
 - [x] CSV / Excel (con auto-detect colonne)
 - [x] PDF via Claude API (alta accuratezza) o regex (fallback)
+- [x] **Filtro non-fatture**: PDF che non sono fatture (lettere, scontrini, contratti, ecc.) vengono saltati con messaggio chiaro invece di creare record spurious
 - [x] XML FatturaPA (parsing nativo, 100% preciso)
 - [x] .xml.p7m (CADES firmato)
 - [x] ZIP (multipli mescolati)

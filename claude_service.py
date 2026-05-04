@@ -20,31 +20,42 @@ ALL_MODELS = [
     ("claude-opus-4-7",            "Opus 4.7 — massima qualità (~€0.08/PDF)"),
 ]
 
-EXTRACTION_PROMPT = """Analizza questa fattura italiana ed estrai SOLO i dati del CLIENTE/DESTINATARIO (cessionario/committente), NON dell'emittente (cedente/prestatore).
+EXTRACTION_PROMPT = """Stai analizzando un PDF caricato da un utente italiano. Devi:
+1. PRIMA decidere se il documento è davvero una FATTURA / parcella / nota di credito / nota di debito (TD01, TD04, TD05, TD06).
+2. SOLO se lo è, estrarre i dati del CLIENTE/DESTINATARIO (cessionario/committente).
 
 Restituisci ESCLUSIVAMENTE un oggetto JSON valido, senza markdown, senza testo extra.
 
 Schema richiesto:
 {
-  "number":      "numero fattura come stringa (es. '100', '2024/0001')",
-  "amount":      numero decimale (importo TOTALE da pagare comprensivo di IVA — Totale documento, NON imponibile),
-  "issue_date":  "data emissione formato YYYY-MM-DD",
-  "due_date":    "data scadenza pagamento formato YYYY-MM-DD",
-  "client_name": "ragione sociale o nome completo del CLIENTE (cessionario)",
-  "vat_number":  "P.IVA del CLIENTE (11 cifre, NON dell'emittente)",
-  "address":     "indirizzo completo del cliente: via, civico, CAP, città, provincia",
-  "phone":       "telefono del cliente, se presente",
-  "email":       "email del cliente, se presente",
-  "pec":         "PEC del cliente, se presente"
+  "is_invoice":     true | false,
+  "doc_type_guess": "fattura" | "nota_credito" | "nota_debito" | "parcella" | "ricevuta" | "scontrino" | "contratto" | "preventivo" | "ddt" | "estratto_conto" | "lettera" | "altro",
+  "number":         "numero fattura come stringa (es. '100', '2024/0001'), null se non è una fattura",
+  "amount":         numero decimale (importo TOTALE da pagare comprensivo di IVA — Totale documento, NON imponibile), null se non è una fattura,
+  "issue_date":     "data emissione formato YYYY-MM-DD",
+  "due_date":       "data scadenza pagamento formato YYYY-MM-DD",
+  "client_name":    "ragione sociale o nome completo del CLIENTE (cessionario)",
+  "vat_number":     "P.IVA del CLIENTE (11 cifre, NON dell'emittente)",
+  "address":        "indirizzo completo del cliente: via, civico, CAP, città, provincia",
+  "phone":          "telefono del cliente, se presente",
+  "email":          "email del cliente, se presente",
+  "pec":            "PEC del cliente, se presente"
 }
 
-REGOLE FONDAMENTALI:
+QUANDO is_invoice = false:
+- Il documento NON è una fattura/parcella/NC/ND italiana.
+- Esempi: ricevute fiscali generiche, scontrini, contratti, preventivi, DDT, estratti conto, brochure, lettere commerciali, comunicazioni, certificati, fogli di calcolo, immagini.
+- In questo caso compila SOLO `is_invoice: false` e `doc_type_guess`. Tutti gli altri campi a null.
+- Non inventare dati. Non forzare l'estrazione se mancano gli elementi tipici (numero fattura, totale, P.IVA cedente E cessionario, dicitura "Fattura"/"Parcella"/"Nota di credito").
+
+QUANDO is_invoice = true:
 - Il CEDENTE/PRESTATORE è chi EMETTE la fattura → IGNORALO completamente.
 - Il CESSIONARIO/COMMITTENTE/DESTINATARIO/SPETTABILE è il CLIENTE → estrai questi dati.
 - L'importo è il "Totale" / "Totale documento" / "Totale da pagare", NON "Imponibile" né "IVA".
 - Le date in formato ISO YYYY-MM-DD (es. "2025-09-04").
-- Se un campo non è determinabile dal documento, usa null (non stringhe vuote).
-- Risposta in JSON puro: nessun ```, nessuna spiegazione, solo l'oggetto JSON."""
+- Se un campo facoltativo (telefono, email, PEC) non è determinabile, usa null.
+
+Risposta in JSON puro: nessun ```, nessuna spiegazione, solo l'oggetto JSON."""
 
 
 def _strip_codefence(s: str) -> str:
