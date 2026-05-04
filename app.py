@@ -1192,6 +1192,35 @@ def create_app():
                           .filter_by(user_id=uid, completed=False)
                           .filter(FiscalDeadline.deadline < today).count())
 
+        # ── Riepilogo mensile (ultimi 12 mesi): incassato + pagato ─────────
+        from dateutil.relativedelta import relativedelta
+        monthly_summary = []
+        first_day_curr = today.replace(day=1)
+        for i in range(11, -1, -1):
+            m_start = first_day_curr - relativedelta(months=i)
+            m_end   = (m_start + relativedelta(months=1)) - timedelta(days=1)
+            incassato = (db.session.query(db.func.sum(Invoice.amount))
+                         .filter_by(user_id=uid, is_passive=False, status="paid")
+                         .filter(Invoice.payment_date >= m_start,
+                                 Invoice.payment_date <= m_end)
+                         .filter(db.or_(Invoice.document_type != "TD04",
+                                        Invoice.document_type.is_(None)))
+                         .scalar() or 0)
+            pagato = (db.session.query(db.func.sum(Invoice.amount))
+                      .filter_by(user_id=uid, is_passive=True, status="paid")
+                      .filter(Invoice.payment_date >= m_start,
+                              Invoice.payment_date <= m_end)
+                      .scalar() or 0)
+            monthly_summary.append({
+                "label": m_start.strftime("%b %y").capitalize(),
+                "year_month": m_start.strftime("%Y-%m"),
+                "incassato": incassato,
+                "pagato": pagato,
+                "netto": incassato - pagato,
+            })
+        max_monthly = max([abs(m["incassato"]) for m in monthly_summary] +
+                          [abs(m["pagato"]) for m in monthly_summary] + [1])
+
         # ── Bandi rilevanti ─────────────────────────────────────────────────
         top_bandi = (db.session.query(Bando, BandoMatch)
                      .join(BandoMatch, BandoMatch.bando_id == Bando.id)
@@ -1265,6 +1294,8 @@ def create_app():
             bank_pending=bank_pending,
             alerts=alerts,
             today=today,
+            monthly_summary=monthly_summary,
+            max_monthly=max_monthly,
         )
 
     # ═══════════════════════════════════════════════════════════════════════════

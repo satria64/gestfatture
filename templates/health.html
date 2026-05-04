@@ -66,6 +66,69 @@
   </div>
 </div>
 
+<!-- RIEPILOGO MENSILE: incassato vs pagato (12 mesi) -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header fw-semibold">
+    <i class="bi bi-bar-chart me-1"></i> Riepilogo mensile (ultimi 12 mesi)
+  </div>
+  <div class="card-body p-0">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Mese</th>
+          <th class="text-end">🟢 Incassato</th>
+          <th class="text-end">🔴 Pagato</th>
+          <th class="text-end">Netto</th>
+          <th style="width:35%">Confronto</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in monthly_summary %}
+        <tr>
+          <td><strong>{{ m.label }}</strong></td>
+          <td class="text-end {% if m.incassato > 0 %}text-success{% else %}text-muted{% endif %}">
+            {% if m.incassato > 0 %}{{ m.incassato | eur }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if m.pagato > 0 %}text-danger{% else %}text-muted{% endif %}">
+            {% if m.pagato > 0 %}{{ m.pagato | eur }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end fw-semibold {{ 'text-success' if m.netto > 0 else ('text-danger' if m.netto < 0 else 'text-muted') }}">
+            {% if m.netto > 0 %}+{{ m.netto | eur }}{% elif m.netto < 0 %}−{{ (-m.netto) | eur }}{% else %}—{% endif %}
+          </td>
+          <td>
+            <div style="position:relative; height:18px">
+              {% if m.incassato > 0 %}
+              <div style="position:absolute;left:50%;height:9px;background:#16a34a;border-radius:0 3px 3px 0;
+                          width:{{ (m.incassato / max_monthly * 50)|round(1) }}%"
+                   title="Incassato {{ m.incassato | eur }}"></div>
+              {% endif %}
+              {% if m.pagato > 0 %}
+              <div style="position:absolute;right:50%;top:9px;height:9px;background:#dc2626;border-radius:3px 0 0 3px;
+                          width:{{ (m.pagato / max_monthly * 50)|round(1) }}%"
+                   title="Pagato {{ m.pagato | eur }}"></div>
+              {% endif %}
+              <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#94a3b8"></div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot class="table-light">
+        <tr>
+          <td><strong>TOTALE 12m</strong></td>
+          <td class="text-end text-success"><strong>{{ monthly_summary|sum(attribute='incassato') | eur }}</strong></td>
+          <td class="text-end text-danger"><strong>{{ monthly_summary|sum(attribute='pagato') | eur }}</strong></td>
+          {% set net12 = monthly_summary|sum(attribute='incassato') - monthly_summary|sum(attribute='pagato') %}
+          <td class="text-end fw-bold {{ 'text-success' if net12 > 0 else 'text-danger' }}">
+            {% if net12 > 0 %}+{{ net12 | eur }}{% else %}−{{ (-net12) | eur }}{% endif %}
+          </td>
+          <td></td>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+</div>
+
 <div class="row g-4">
   <!-- COL SX: prossimi 7gg -->
   <div class="col-lg-6">
