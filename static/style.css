@@ -4,10 +4,12 @@ body {
   min-height: 100vh;
 }
 
-.sidebar {
+.sidebar,
+.sidebar.offcanvas-md {
   width: 220px;
   min-height: 100vh;
-  background: #1e3a5f;
+  background-color: #1e3a5f !important;
+  color: #fff;
   position: sticky;
   top: 0;
   height: 100vh;
