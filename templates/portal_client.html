@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Le tue fatture – {{ company_name }}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+  <style>
+    body { background:#f8fafc; }
+    .wrap { max-width:880px; margin:0 auto; padding:24px 16px 64px; }
+    .brand { background:#1e3a5f; color:#fff; padding:24px 28px; border-radius:8px 8px 0 0; }
+    .panel { background:#fff; padding:24px 28px; border-radius:0 0 8px 8px;
+             box-shadow:0 2px 12px rgba(0,0,0,.05); }
+    .stat { background:#f1f5f9; border-radius:8px; padding:16px; text-align:center; }
+    .stat .num { font-size:1.8rem; font-weight:700; line-height:1; }
+    .row-overdue { background:#fef2f2; }
+    .row-pending { background:#fffbeb; }
+    @media print { .no-print { display:none !important; } body { background:#fff; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <div class="small opacity-75">Riepilogo fatture</div>
+          <h2 class="mb-0">{{ company_name }}</h2>
+        </div>
+        <div class="text-end small opacity-75">
+          Cliente: <strong>{{ client.name }}</strong>
+          {% if client.vat_number %}<br>P.IVA {{ client.vat_number }}{% endif %}
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <!-- KPI -->
+      <div class="row g-3 mb-4">
+        <div class="col-6 col-md-4">
+          <div class="stat">
+            <div class="num text-danger">{{ open_invs|selectattr('status','equalto','overdue')|list|length }}</div>
+            <div class="small text-muted">Scadute</div>
+          </div>
+        </div>
+        <div class="col-6 col-md-4">
+          <div class="stat">
+            <div class="num text-warning">{{ open_invs|selectattr('status','equalto','pending')|list|length }}</div>
+            <div class="small text-muted">In attesa</div>
+          </div>
+        </div>
+        <div class="col-12 col-md-4">
+          <div class="stat">
+            <div class="num text-primary">€ {{ '%.2f'|format(total_due)|replace('.', ',') }}</div>
+            <div class="small text-muted">Totale da saldare</div>
+          </div>
+        </div>
+      </div>
+
+      {% if open_invs %}
+        <h5 class="mb-3"><i class="bi bi-file-earmark-text me-1"></i> Fatture aperte</h5>
+        <div class="table-responsive mb-4">
+          <table class="table table-sm align-middle">
+            <thead class="table-light">
+              <tr>
+                <th>Numero</th><th>Emissione</th><th>Scadenza</th>
+                <th class="text-end">Importo</th><th>Stato</th><th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for inv in open_invs %}
+              <tr class="{% if inv.status == 'overdue' %}row-overdue{% else %}row-pending{% endif %}">
+                <td><strong>{{ inv.number }}</strong></td>
+                <td class="small">{{ inv.issue_date.strftime('%d/%m/%Y') }}</td>
+                <td class="small">
+                  {{ inv.due_date.strftime('%d/%m/%Y') }}
+                  {% if inv.status == 'overdue' %}
+                    <span class="badge bg-danger ms-1">+{{ inv.days_overdue }}gg</span>
+                  {% endif %}
+                </td>
+                <td class="text-end fw-semibold">€ {{ '%.2f'|format(inv.amount)|replace('.', ',') }}</td>
+                <td>
+                  {% if inv.status == 'overdue' %}
+                    <span class="badge bg-danger">Scaduta</span>
+                  {% else %}
+                    <span class="badge bg-warning text-dark">In attesa</span>
+                  {% endif %}
+                </td>
+                <td class="text-end no-print">
+                  {% if inv.payment_link %}
+                    <a href="{{ inv.payment_link }}" class="btn btn-sm btn-success" target="_blank">
+                      <i class="bi bi-credit-card me-1"></i> Paga
+                    </a>
+                  {% endif %}
+                  {% if inv.pdf_filename %}
+                    <a href="{{ url_for('client_portal_pdf', token=token, iid=inv.id) }}"
+                       class="btn btn-sm btn-outline-secondary" target="_blank" title="Scarica PDF">
+                      <i class="bi bi-file-earmark-pdf"></i>
+                    </a>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <div class="alert alert-success mb-4">
+          <i class="bi bi-check-circle me-1"></i> Nessuna fattura aperta. Tutto in regola, grazie!
+        </div>
+      {% endif %}
+
+      {% if paid_invs %}
+        <details class="mb-3">
+          <summary class="fw-semibold mb-2" style="cursor:pointer">
+            <i class="bi bi-archive me-1"></i> Fatture già saldate ({{ paid_invs|length }})
+          </summary>
+          <div class="table-responsive mt-3">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+                <tr><th>Numero</th><th>Scadenza</th><th>Pagata il</th><th class="text-end">Importo</th><th></th></tr>
+              </thead>
+              <tbody>
+                {% for inv in paid_invs %}
+                <tr>
+                  <td><strong>{{ inv.number }}</strong></td>
+                  <td class="small">{{ inv.due_date.strftime('%d/%m/%Y') }}</td>
+                  <td class="small text-success">
+                    {% if inv.payment_date %}{{ inv.payment_date.strftime('%d/%m/%Y') }}{% else %}—{% endif %}
+                  </td>
+                  <td class="text-end">€ {{ '%.2f'|format(inv.amount)|replace('.', ',') }}</td>
+                  <td class="text-end no-print">
+                    {% if inv.pdf_filename %}
+                      <a href="{{ url_for('client_portal_pdf', token=token, iid=inv.id) }}"
+                         class="btn btn-sm btn-outline-secondary" target="_blank">
+                        <i class="bi bi-file-earmark-pdf"></i>
+                      </a>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </details>
+      {% endif %}
+
+      <hr>
+      <div class="d-flex justify-content-between align-items-center small text-muted flex-wrap gap-2">
+        <div>
+          {% if contact_email %}
+            Per qualsiasi chiarimento:
+            <a href="mailto:{{ contact_email }}">{{ contact_email }}</a>
+          {% endif %}
+        </div>
+        <button class="btn btn-sm btn-outline-secondary no-print" onclick="window.print()">
+          <i class="bi bi-printer me-1"></i> Stampa
+        </button>
+      </div>
+    </div>
+
+    <p class="text-center small text-muted mt-3">
+      Pagina riservata. Generata da
+      <a href="{{ url_for('login') }}" class="text-muted">GestFatture</a>.
+    </p>
+  </div>
+</body>
+</html>

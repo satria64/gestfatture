@@ -157,16 +157,15 @@ def send_email_to_owner(user, invoice) -> tuple[bool, str]:
     msg.attach(MIMEText(html, "html", "utf-8"))
 
     try:
-        if cfg["use_tls"]:
-            server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10)
-            server.starttls()
-        else:
-            server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10)
-        if cfg["user"] and cfg["password"]:
-            server.login(cfg["user"], cfg["password"])
-        server.sendmail(cfg["user"], user.email, msg.as_string())
-        server.quit()
-        return True, f"Email inviata a {user.email}"
+        from email_service import deliver_email
+        ok, info = deliver_email(
+            msg=msg, subject=subject, recipient=user.email,
+            html=html, plain="",
+            sender_name=company_name, sender_email=cfg["user"],
+        )
+        if ok:
+            return True, f"Email inviata a {user.email} [{info}]"
+        return False, info
     except Exception as e:
         log.error("Errore email a %s: %s", user.email, e)
         return False, str(e)
@@ -325,16 +324,15 @@ def _send_pec_email_to_owner(user, pec_msg) -> tuple[bool, str]:
     msg.attach(MIMEText(html, "html", "utf-8"))
 
     try:
-        if cfg["use_tls"]:
-            server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10)
-            server.starttls()
-        else:
-            server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10)
-        if cfg["user"] and cfg["password"]:
-            server.login(cfg["user"], cfg["password"])
-        server.sendmail(cfg["user"], user.email, msg.as_string())
-        server.quit()
-        return True, "Email PEC inviata"
+        from email_service import deliver_email
+        ok, info = deliver_email(
+            msg=msg, subject=subject, recipient=user.email,
+            html=html, plain="",
+            sender_name="GestFatture PEC", sender_email=cfg["user"],
+        )
+        if ok:
+            return True, f"Email PEC inviata [{info}]"
+        return False, info
     except Exception as e:
         log.error("Errore email PEC: %s", e)
         return False, str(e)

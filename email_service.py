@@ -24,6 +24,93 @@ def _get_smtp_config():
     }
 
 
+# ─── Provider dispatcher (SMTP / Resend) ────────────────────────────────────
+def email_provider() -> str:
+    """Restituisce 'resend' se è il provider preferito + API key configurata, altrimenti 'smtp'."""
+    pref = (AppSettings.get("email_provider", "smtp") or "smtp").lower()
+    if pref == "resend" and AppSettings.get("resend_api_key", "").strip():
+        return "resend"
+    return "smtp"
+
+
+def _send_via_smtp(msg, sender_email: str, recipient: str) -> tuple[bool, str]:
+    cfg = _get_smtp_config()
+    if not cfg["host"] or not cfg["user"]:
+        return False, "SMTP non configurato"
+    try:
+        if cfg["use_tls"]:
+            server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=15)
+            server.starttls()
+        else:
+            server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=15)
+        if cfg["user"] and cfg["password"]:
+            server.login(cfg["user"], cfg["password"])
+        server.sendmail(sender_email, recipient, msg.as_string())
+        server.quit()
+        return True, "OK (SMTP)"
+    except Exception as e:
+        return False, f"SMTP: {e}"
+
+
+def _send_via_resend(subject: str, recipient: str, html: str, plain: str,
+                     sender_name: str, sender_email: str,
+                     reply_to: str | None = None,
+                     attachments: list[dict] | None = None) -> tuple[bool, str]:
+    """attachments: lista di {filename, content (bytes)}."""
+    api_key  = AppSettings.get("resend_api_key", "").strip()
+    from_addr = AppSettings.get("resend_from_email", "").strip() or sender_email
+    if not api_key:
+        return False, "Resend API key non configurata"
+    if not from_addr:
+        return False, "Resend from email non configurato"
+    try:
+        import resend
+        resend.api_key = api_key
+        from_field = f"{sender_name} <{from_addr}>" if sender_name else from_addr
+        params = {
+            "from": from_field,
+            "to": [recipient],
+            "subject": subject,
+            "html": html,
+            "text": plain or "",
+        }
+        if reply_to:
+            params["reply_to"] = reply_to
+        if attachments:
+            import base64
+            params["attachments"] = [
+                {"filename": a["filename"],
+                 "content":  base64.b64encode(a["content"]).decode()}
+                for a in attachments
+            ]
+        result = resend.Emails.send(params)
+        return True, f"OK (Resend id={result.get('id', '?')})"
+    except Exception as e:
+        return False, f"Resend: {e}"
+
+
+def deliver_email(*, msg, subject: str, recipient: str, html: str, plain: str,
+                  sender_name: str, sender_email: str,
+                  reply_to: str | None = None,
+                  attachments: list[dict] | None = None) -> tuple[bool, str]:
+    """Invia un'email tramite Resend (se configurato come provider) o SMTP.
+
+    Se Resend fallisce, fa fallback automatico su SMTP.
+    `msg` è il MIMEMessage già pronto, usato dal path SMTP.
+    Gli altri argomenti servono al path Resend.
+    """
+    if email_provider() == "resend":
+        ok, info = _send_via_resend(
+            subject=subject, recipient=recipient, html=html, plain=plain,
+            sender_name=sender_name, sender_email=sender_email,
+            reply_to=reply_to, attachments=attachments,
+        )
+        if ok:
+            return ok, info
+        log.warning("Resend ha fallito (%s) – fallback SMTP", info)
+    return _send_via_smtp(msg, sender_email, recipient)
+
+
 def _html_to_text(html: str) -> str:
     """Converte l'HTML del sollecito in testo semplice leggibile."""
     # Sostituzione tag a-tag con testo + link tra parentesi
@@ -186,33 +273,29 @@ def send_reminder(invoice, reminder_type: str) -> bool:
     msg["Auto-Submitted"] = "auto-generated"
 
     # Allega il PDF della fattura se presente
+    pdf_attachment = None
     if has_pdf:
-        pdf_path = os.path.join(os.getcwd(), "uploads", invoice.pdf_filename)
+        from app import get_upload_folder
+        pdf_path = os.path.join(get_upload_folder(), invoice.pdf_filename)
         if os.path.exists(pdf_path):
             with open(pdf_path, "rb") as fp:
-                part = MIMEApplication(fp.read(), _subtype="pdf")
-                part.add_header(
-                    "Content-Disposition", "attachment",
-                    filename=f"Fattura_{invoice.number.replace('/', '_')}.pdf"
-                )
-                msg.attach(part)
+                pdf_bytes = fp.read()
+            pdf_filename = f"Fattura_{invoice.number.replace('/', '_')}.pdf"
+            part = MIMEApplication(pdf_bytes, _subtype="pdf")
+            part.add_header("Content-Disposition", "attachment", filename=pdf_filename)
+            msg.attach(part)
+            pdf_attachment = {"filename": pdf_filename, "content": pdf_bytes}
             log.info("Allegato PDF: %s", pdf_path)
 
-    try:
-        if cfg["use_tls"]:
-            server = smtplib.SMTP(cfg["host"], cfg["port"], timeout=10)
-            server.starttls()
-        else:
-            server = smtplib.SMTP_SSL(cfg["host"], cfg["port"], timeout=10)
-
-        if cfg["user"] and cfg["password"]:
-            server.login(cfg["user"], cfg["password"])
-
-        server.sendmail(cfg["user"], recipient, msg.as_string())
-        server.quit()
-        log.info("Email inviata a %s – tipo: %s", recipient, reminder_type)
-        return True
-
-    except Exception as exc:
-        log.error("Errore invio email: %s", exc)
-        return False
+    ok, info = deliver_email(
+        msg=msg, subject=subject, recipient=recipient,
+        html=html_body, plain=plain_body,
+        sender_name=company_name, sender_email=sender_email,
+        reply_to=sender_email,
+        attachments=[pdf_attachment] if pdf_attachment else None,
+    )
+    if ok:
+        log.info("Email inviata a %s – tipo: %s [%s]", recipient, reminder_type, info)
+    else:
+        log.error("Errore invio email: %s", info)
+    return ok

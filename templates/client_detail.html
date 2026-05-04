@@ -39,7 +39,7 @@
       </div>
     </div>
 
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm mb-4">
       <div class="card-header fw-semibold">Credit Score</div>
       <div class="card-body text-center">
         <div class="display-4 fw-bold text-{{ risk[1] }}">{{ client.credit_score }}</div>
@@ -53,6 +53,31 @@
           {% else %}frequenti ritardi, valutare dilazioni
           {% endif %}
         </p>
+      </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-link-45deg me-1"></i> Portale cliente
+      </div>
+      <div class="card-body">
+        <p class="small text-muted mb-2">
+          Link pubblico per far vedere al cliente le sue fatture aperte. Resta valido un anno
+          dalla generazione.
+        </p>
+        <div class="input-group input-group-sm mb-2">
+          <input type="text" class="form-control font-monospace small" id="portalLink"
+                 value="{{ portal_url }}" readonly onclick="this.select()">
+          <button class="btn btn-outline-primary" type="button"
+                  onclick="navigator.clipboard.writeText(document.getElementById('portalLink').value); this.innerText='Copiato'">
+            <i class="bi bi-clipboard"></i>
+          </button>
+          <a class="btn btn-outline-secondary" href="{{ portal_url }}" target="_blank"
+             title="Apri in nuova scheda">
+            <i class="bi bi-box-arrow-up-right"></i>
+          </a>
+        </div>
+        <div class="form-text">Mandalo via email/WhatsApp/SMS al cliente.</div>
       </div>
     </div>
   </div>

@@ -540,6 +540,60 @@ def create_app():
             headers={"Content-Disposition": f'attachment; filename="{fname}"'},
         )
 
+    # ── Customer portal pubblico (link firmato, no login) ────────────────────
+    @app.route("/portal/<token>")
+    @limiter.limit("60 per hour")
+    def client_portal(token):
+        from tokens import verify_portal_token
+        payload = verify_portal_token(token)
+        if not payload:
+            return render_template("portal_error.html",
+                                   reason="Link non valido o scaduto."), 404
+        client = Client.query.filter_by(id=payload["c"], user_id=payload["u"]).first()
+        if not client:
+            return render_template("portal_error.html",
+                                   reason="Cliente non trovato."), 404
+        owner = User.query.get(payload["u"])
+        company_name = (UserSetting.get(owner.id, "company_name") if owner else "") \
+                       or AppSettings.get("company_name", "GestFatture")
+        contact_email = AppSettings.get("legal_contact_email", "") or (owner.email if owner else "")
+        # Aggiorna stato fatture (per evitare di mostrare "pending" su fatture in realtà scadute)
+        for inv in client.invoices:
+            inv.update_status()
+        db.session.commit()
+        # Solo fatture vere (no NC)
+        invs = [i for i in client.invoices if i.document_type != "TD04"]
+        open_invs = sorted(
+            [i for i in invs if i.status in ("pending", "overdue")],
+            key=lambda i: i.due_date,
+        )
+        paid_invs = sorted(
+            [i for i in invs if i.status == "paid"],
+            key=lambda i: i.payment_date or i.due_date, reverse=True,
+        )
+        total_due = sum(i.amount for i in open_invs)
+        return render_template("portal_client.html",
+                               client=client, company_name=company_name,
+                               contact_email=contact_email,
+                               open_invs=open_invs, paid_invs=paid_invs,
+                               total_due=total_due, token=token)
+
+    @app.route("/portal/<token>/invoice/<int:iid>/pdf")
+    @limiter.limit("60 per hour")
+    def client_portal_pdf(token, iid):
+        """Scarica un PDF di fattura tramite token portale (no login)."""
+        from tokens import verify_portal_token
+        payload = verify_portal_token(token)
+        if not payload:
+            abort(404)
+        inv = Invoice.query.filter_by(
+            id=iid, client_id=payload["c"], user_id=payload["u"]
+        ).first()
+        if not inv or not inv.pdf_filename:
+            abort(404)
+        return send_from_directory(get_upload_folder(), inv.pdf_filename,
+                                   as_attachment=False)
+
     # ── Pagine legali pubbliche (privacy + termini) ──────────────────────────
     def _legal_context():
         keys = ("legal_company", "legal_vat", "legal_address", "legal_contact_email")
@@ -720,7 +774,11 @@ def create_app():
     @app.route("/clients/<int:cid>")
     @login_required
     def client_detail(cid):
-        return render_template("client_detail.html", client=get_my_client(cid))
+        from tokens import make_portal_url
+        c = get_my_client(cid)
+        return render_template("client_detail.html",
+                               client=c,
+                               portal_url=make_portal_url(c))
 
     @app.route("/clients/<int:cid>/edit", methods=["GET", "POST"])
     @login_required
@@ -1521,7 +1579,8 @@ def create_app():
         admin_keys = ["smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "smtp_use_tls", "stripe_webhook_secret", "paypal_webhook_id",
                       "anthropic_api_key", "anthropic_model", "app_external_url",
-                      "legal_company", "legal_vat", "legal_address", "legal_contact_email"]
+                      "legal_company", "legal_vat", "legal_address", "legal_contact_email",
+                      "email_provider", "resend_api_key", "resend_from_email"]
 
         if request.method == "POST":
             # Salva sempre le chiavi personali del current_user
@@ -1533,7 +1592,7 @@ def create_app():
                 for k in admin_keys:
                     val = request.form.get(k, "")
                     val = val.strip().strip("\r\n\t ")
-                    if k in ("smtp_password",) and not val:
+                    if k in ("smtp_password", "resend_api_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
                     if old_val != val:
@@ -1967,6 +2026,101 @@ def create_app():
             audit("password_reset", target=f"user:{u.username}")
             flash(f"Password di '{u.username}' aggiornata.", "success")
         return redirect(url_for("users"))
+
+    @app.route("/admin/metrics")
+    @admin_required
+    def admin_metrics():
+        """Dashboard admin: metriche di sistema (utenti, fatture, attività, errori)."""
+        from sqlalchemy import func as _f
+        now = datetime.utcnow()
+        d7  = now - timedelta(days=7)
+        d30 = now - timedelta(days=30)
+
+        # ── Utenti ──────────────────────────────────────────────────────────
+        users_all     = User.query.count()
+        users_admin   = User.query.filter_by(is_admin=True).count()
+        users_guest   = User.query.filter(User.username.like("ospite_%")).count()
+        users_real    = users_all - users_guest
+        users_new_7d  = User.query.filter(User.created_at >= d7).count()
+        users_new_30d = User.query.filter(User.created_at >= d30).count()
+        users_active_30d = (db.session.query(_f.count(_f.distinct(AuditLog.user_id)))
+                            .filter(AuditLog.action == "login_success",
+                                    AuditLog.timestamp >= d30,
+                                    AuditLog.user_id.isnot(None))
+                            .scalar() or 0)
+
+        # ── Clienti / fatture (aggregati globali, tutti gli utenti) ─────────
+        clients_total  = Client.query.count()
+        invoices_total = Invoice.query.filter(
+            db.or_(Invoice.document_type != "TD04", Invoice.document_type.is_(None))
+        ).count()
+        by_status = dict(
+            db.session.query(Invoice.status, _f.count(Invoice.id))
+            .filter(db.or_(Invoice.document_type != "TD04", Invoice.document_type.is_(None)))
+            .group_by(Invoice.status).all()
+        )
+        amount_issued = (db.session.query(_f.sum(Invoice.amount))
+                         .filter(db.or_(Invoice.document_type != "TD04",
+                                        Invoice.document_type.is_(None)))
+                         .scalar() or 0)
+        amount_paid    = (db.session.query(_f.sum(Invoice.amount))
+                          .filter(Invoice.status == "paid").scalar() or 0)
+        amount_overdue = (db.session.query(_f.sum(Invoice.amount))
+                          .filter(Invoice.status == "overdue").scalar() or 0)
+
+        # ── Solleciti (Reminder) ────────────────────────────────────────────
+        reminders_30d = Reminder.query.filter(Reminder.sent_at >= d30).count()
+        reminders_failed_30d = Reminder.query.filter(
+            Reminder.sent_at >= d30, Reminder.success.is_(False)
+        ).count()
+
+        # ── PEC istituzionali ───────────────────────────────────────────────
+        pec_total = PecMessage.query.count()
+        pec_7d    = PecMessage.query.filter(PecMessage.received_at >= d7).count()
+
+        # ── Audit log: top azioni ultimi 7 giorni ───────────────────────────
+        top_actions = (db.session.query(AuditLog.action, _f.count(AuditLog.id))
+                       .filter(AuditLog.timestamp >= d7)
+                       .group_by(AuditLog.action)
+                       .order_by(_f.count(AuditLog.id).desc())
+                       .limit(10).all())
+
+        # ── Errori integrazioni recenti ─────────────────────────────────────
+        # Recupera per ogni utente l'ultimo error string salvato in UserSetting
+        integration_errors = []
+        for key in ("integration_pec_last_error",
+                    "integration_folder_last_error",
+                    "integration_fic_last_error"):
+            rows = (UserSetting.query
+                    .filter(UserSetting.key == key, UserSetting.value != "")
+                    .all())
+            for r in rows:
+                u = User.query.get(r.user_id)
+                integration_errors.append({
+                    "user": u.username if u else f"#{r.user_id}",
+                    "kind": key.replace("integration_", "").replace("_last_error", ""),
+                    "msg":  r.value[:200],
+                })
+
+        # ── Tickets ─────────────────────────────────────────────────────────
+        tickets_open = SupportTicket.query.filter(
+            SupportTicket.status.in_(["open", "in_progress", "waiting_user"])
+        ).count()
+
+        return render_template("admin_metrics.html",
+            users_all=users_all, users_admin=users_admin, users_guest=users_guest,
+            users_real=users_real, users_new_7d=users_new_7d,
+            users_new_30d=users_new_30d, users_active_30d=users_active_30d,
+            clients_total=clients_total, invoices_total=invoices_total,
+            by_status=by_status,
+            amount_issued=amount_issued, amount_paid=amount_paid,
+            amount_overdue=amount_overdue,
+            reminders_30d=reminders_30d, reminders_failed_30d=reminders_failed_30d,
+            pec_total=pec_total, pec_7d=pec_7d,
+            top_actions=top_actions,
+            integration_errors=integration_errors,
+            tickets_open=tickets_open,
+        )
 
     @app.route("/admin/audit-log")
     @admin_required

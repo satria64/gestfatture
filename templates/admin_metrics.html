@@ -1,0 +1,183 @@
+{% extends "base.html" %}
+{% block title %}Metriche – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-graph-up me-2"></i>Metriche di sistema</h2>
+  <p class="text-muted small">
+    Vista globale di tutti gli utenti del SaaS. Dati aggregati in tempo reale.
+  </p>
+</div>
+
+<!-- Riga 1: utenti -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <h6 class="text-uppercase text-muted small mb-2">Utenti</h6>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ users_all }}</div>
+      <div class="small text-muted">Totale account</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-success">{{ users_real }}</div>
+      <div class="small text-muted">Reali ({{ users_admin }} admin)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-info">{{ users_active_30d }}</div>
+      <div class="small text-muted">Attivi 30gg (login)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-primary">+{{ users_new_7d }}</div>
+      <div class="small text-muted">Nuovi 7gg ({{ users_new_30d }} ultimi 30gg)</div>
+    </div>
+  </div>
+</div>
+
+<!-- Riga 2: contabilità globale -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <h6 class="text-uppercase text-muted small mb-2">Fatture e clienti (aggregato)</h6>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ clients_total }}</div>
+      <div class="small text-muted">Clienti</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ invoices_total }}</div>
+      <div class="small text-muted">Fatture totali</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-warning">{{ by_status.get('pending', 0) }}</div>
+      <div class="small text-muted">In attesa</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-danger">{{ by_status.get('overdue', 0) }}</div>
+      <div class="small text-muted">Scadute</div>
+    </div>
+  </div>
+
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="small text-muted">Emesso totale</div>
+      <div class="fs-3 fw-bold">{{ amount_issued | eur }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="small text-muted">Incassato</div>
+      <div class="fs-3 fw-bold text-success">{{ amount_paid | eur }}</div>
+    </div>
+  </div>
+  <div class="col-md-4">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="small text-muted">Insoluto</div>
+      <div class="fs-3 fw-bold text-danger">{{ amount_overdue | eur }}</div>
+    </div>
+  </div>
+</div>
+
+<!-- Riga 3: attività -->
+<div class="row g-3 mb-4">
+  <div class="col-12">
+    <h6 class="text-uppercase text-muted small mb-2">Attività & assistenza</h6>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ reminders_30d }}</div>
+      <div class="small text-muted">Solleciti inviati 30gg</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold {% if reminders_failed_30d > 0 %}text-danger{% endif %}">
+        {{ reminders_failed_30d }}
+      </div>
+      <div class="small text-muted">Solleciti falliti 30gg</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ pec_total }}</div>
+      <div class="small text-muted">PEC istituzionali ({{ pec_7d }} ultimi 7gg)</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold {% if tickets_open > 0 %}text-warning{% endif %}">
+        {{ tickets_open }}
+      </div>
+      <div class="small text-muted">Ticket aperti</div>
+    </div>
+  </div>
+</div>
+
+<!-- Top azioni 7gg -->
+<div class="row g-3 mb-4">
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-list-ol me-1"></i> Top azioni audit (7 giorni)
+      </div>
+      <div class="card-body p-0">
+        {% if top_actions %}
+          <table class="table table-sm mb-0">
+            <tbody>
+              {% for action, count in top_actions %}
+              <tr>
+                <td><code class="small">{{ action }}</code></td>
+                <td class="text-end fw-semibold">{{ count }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-muted small p-3 mb-0">Nessuna attività negli ultimi 7 giorni.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-header fw-semibold">
+        <i class="bi bi-exclamation-circle me-1"></i> Errori integrazioni recenti
+      </div>
+      <div class="card-body p-0">
+        {% if integration_errors %}
+          <table class="table table-sm mb-0">
+            <tbody>
+              {% for e in integration_errors %}
+              <tr>
+                <td class="small">
+                  <strong>{{ e.user }}</strong>
+                  <span class="badge bg-secondary ms-1">{{ e.kind }}</span><br>
+                  <span class="text-muted">{{ e.msg }}</span>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        {% else %}
+          <p class="text-success small p-3 mb-0">
+            <i class="bi bi-check-circle me-1"></i> Nessun errore integrazione attivo.
+          </p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

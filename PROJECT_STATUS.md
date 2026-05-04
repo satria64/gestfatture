@@ -181,11 +181,11 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - Considerare revisione legale di `templates/privacy.html` e `templates/terms.html` prima della pubblicazione effettiva
 
 ### Nice to have
-- [ ] Dashboard admin con metriche di sistema (utenti totali, fatture totali, ecc.)
+- [x] **Dashboard admin con metriche di sistema** (utenti, fatture, attività, errori) → `/admin/metrics`
+- [x] **Resend** come alternativa SMTP (provider configurabile in Impostazioni admin, fallback automatico)
+- [x] **Customer portal pubblico** (`/portal/<token>`, link firmato 1 anno, generabile dalla pagina cliente)
 - [ ] Knowledge base navigabile in /help
 - [ ] Custom domain setup (gestfatture.tuoazienda.it)
-- [ ] Migrazione SMTP a Resend per deliverability migliore (le email vanno in spam)
-- [ ] Customer portal pubblico (i clienti vedono le LORO fatture)
 - [ ] Esportazione tickets in CSV/PDF
 - [ ] Survey post-risoluzione ticket
 - [ ] Crittografia at-rest dei secret (Fernet)
@@ -234,4 +234,4 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR & Compliance completato: export, delete, privacy/terms, cookie banner, 2FA TOTP, Sentry)*
+*Ultimo aggiornamento: 2026-05-04 (Step 3 GDPR completato + Resend + Customer portal + Admin metriche + diagnostica notifiche PEC)*

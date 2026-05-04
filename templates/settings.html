@@ -99,6 +99,60 @@
     </div>
   </div>
 
+  <!-- Provider email + Resend (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+    <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
+      <i class="bi bi-send me-1"></i> Provider email
+      <span class="badge bg-warning text-dark ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info py-2 small mb-3">
+        <strong>Resend</strong> migliora drasticamente la deliverability rispetto a Gmail SMTP:
+        gestisce SPF/DKIM/DMARC out-of-the-box e riduce le email finite in spam.
+        Piano gratuito 3.000 email/mese.
+        <a href="https://resend.com/signup" target="_blank">resend.com</a> →
+        crea API key + verifica un dominio.
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Provider attivo</label>
+        <select name="email_provider" class="form-select">
+          <option value="smtp"   {% if settings.email_provider != 'resend' %}selected{% endif %}>
+            SMTP (configurazione qui sopra) — default
+          </option>
+          <option value="resend" {% if settings.email_provider == 'resend' %}selected{% endif %}>
+            Resend API (consigliato per produzione)
+          </option>
+        </select>
+        <div class="form-text">
+          Se selezioni Resend ma manca la API key, l'app fa automaticamente fallback su SMTP.
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Resend API key (re_…)</label>
+        <input type="password" name="resend_api_key" class="form-control"
+               value="{{ settings.resend_api_key }}" placeholder="re_xxxxxxxxxxxxxxxx">
+        <div class="form-text">
+          Trovala su <a href="https://resend.com/api-keys" target="_blank">resend.com/api-keys</a>.
+          Lascia vuoto per non modificare la chiave esistente.
+        </div>
+      </div>
+
+      <div>
+        <label class="form-label fw-semibold">Email mittente per Resend</label>
+        <input type="email" name="resend_from_email" class="form-control"
+               value="{{ settings.resend_from_email }}"
+               placeholder="noreply@tuodominio.it">
+        <div class="form-text">
+          Deve essere su un dominio verificato su Resend. Esempio:
+          <code>fatture@tuodominio.it</code>. Se vuoto usa l'indirizzo SMTP (non consigliato:
+          probabilmente non è verificato e Resend rifiuterà).
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Anthropic Claude API (solo admin) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-primary border-4">
     <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis">

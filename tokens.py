@@ -53,3 +53,36 @@ def make_action_url(invoice, action: str, base_url: str = "") -> str:
     base_url = base_url.rstrip("/")
     token = make_token(invoice.user_id, invoice.id, action)
     return f"{base_url}/quick/{token}"
+
+
+# ─── Customer portal ────────────────────────────────────────────────────────
+PORTAL_SALT    = "gestfatture-client-portal-v1"
+PORTAL_MAX_AGE = 60 * 60 * 24 * 365  # 1 anno
+
+
+def _portal_serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=PORTAL_SALT)
+
+
+def make_portal_token(client_id: int, user_id: int) -> str:
+    """Token firmato per accesso pubblico del cliente alla sua pagina insoluti."""
+    return _portal_serializer().dumps({"c": client_id, "u": user_id})
+
+
+def verify_portal_token(token: str, max_age: int = PORTAL_MAX_AGE) -> dict | None:
+    try:
+        payload = _portal_serializer().loads(token, max_age=max_age)
+        if isinstance(payload, dict) and "c" in payload and "u" in payload:
+            return payload
+    except (BadSignature, SignatureExpired):
+        return None
+    return None
+
+
+def make_portal_url(client, base_url: str = "") -> str:
+    from models import AppSettings
+    if not base_url:
+        base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000")
+    base_url = base_url.rstrip("/")
+    token = make_portal_token(client.id, client.user_id)
+    return f"{base_url}/portal/{token}"
