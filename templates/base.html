@@ -13,14 +13,36 @@
 </head>
 <body>
 
-<div class="d-flex">
-  <!-- Sidebar -->
-  <nav class="sidebar d-flex flex-column flex-shrink-0 p-3 text-white">
-    <a href="{{ url_for('dashboard') }}" class="d-flex align-items-center mb-3 text-white text-decoration-none">
+<!-- Mobile top-bar con hamburger (visibile solo < md) -->
+<nav class="mobile-topbar d-md-none">
+  <button class="btn-burger" type="button"
+          data-bs-toggle="offcanvas" data-bs-target="#appSidebar"
+          aria-controls="appSidebar" aria-label="Menu">
+    <i class="bi bi-list"></i>
+  </button>
+  <a href="{{ url_for('dashboard') }}" class="brand">
+    <i class="bi bi-receipt-cutoff me-1"></i> GestFatture
+  </a>
+  <span style="width:38px"></span>
+</nav>
+
+<div class="d-flex app-shell">
+  <!-- Sidebar: offcanvas su mobile, sticky su desktop -->
+  <nav class="sidebar offcanvas-md offcanvas-start d-flex flex-column flex-shrink-0 p-3 text-white"
+       id="appSidebar" tabindex="-1" aria-labelledby="appSidebarLabel">
+    <div class="offcanvas-header d-md-none p-0 mb-3">
+      <a href="{{ url_for('dashboard') }}" class="d-flex align-items-center text-white text-decoration-none">
+        <i class="bi bi-receipt-cutoff fs-4 me-2"></i>
+        <span class="fw-bold fs-5" id="appSidebarLabel">GestFatture</span>
+      </a>
+      <button type="button" class="btn-close btn-close-white"
+              data-bs-dismiss="offcanvas" aria-label="Chiudi"></button>
+    </div>
+    <a href="{{ url_for('dashboard') }}" class="d-none d-md-flex align-items-center mb-3 text-white text-decoration-none">
       <i class="bi bi-receipt-cutoff fs-4 me-2"></i>
       <span class="fw-bold fs-5">GestFatture</span>
     </a>
-    <hr>
+    <hr class="d-none d-md-block">
     <ul class="nav nav-pills flex-column mb-auto gap-1">
       <li>
         <a href="{{ url_for('dashboard') }}"

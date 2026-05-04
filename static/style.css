@@ -25,6 +25,50 @@ main {
   max-width: 1200px;
 }
 
+/* ── Mobile top-bar (hamburger) ─────────────────────────────────────── */
+.mobile-topbar {
+  background: #1e3a5f;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  position: sticky;
+  top: 0;
+  z-index: 1030;
+  box-shadow: 0 2px 8px rgba(0,0,0,.12);
+}
+.mobile-topbar .brand {
+  color: #fff;
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 1.05rem;
+}
+.mobile-topbar .btn-burger {
+  background: transparent;
+  border: 0;
+  color: #fff;
+  font-size: 1.7rem;
+  line-height: 1;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+/* Mobile (< md): la sidebar diventa offcanvas; padding main ridotto */
+@media (max-width: 767.98px) {
+  .sidebar {
+    width: 280px !important;
+    min-height: 100vh;
+    height: 100%;
+  }
+  main {
+    padding: 1rem !important;
+  }
+  .app-shell {
+    flex-direction: column;
+  }
+}
+
 /* ── KPI cards ──────────────────────────────────────────────────────── */
 .kpi-card {
   border-radius: 10px;
