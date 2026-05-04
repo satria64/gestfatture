@@ -1696,6 +1696,20 @@ def create_app():
         flash("PEC eliminata.", "info")
         return redirect(url_for("pec_inbox"))
 
+    @app.route("/pec/<int:pid>/test-whatsapp", methods=["POST"])
+    @login_required
+    @limiter.limit("10 per minute")
+    def pec_test_whatsapp(pid):
+        """Manda un WhatsApp di test usando questa PEC, per diagnosticare le notifiche PEC."""
+        m = PecMessage.query.filter_by(id=pid, user_id=current_user.id).first_or_404()
+        from notification_service import _send_pec_whatsapp_to_owner
+        ok, msg = _send_pec_whatsapp_to_owner(current_user, m)
+        audit("pec_notify_test", target=f"pec:{m.id}",
+              details=f"{'OK' if ok else 'FAIL'}: {msg[:120]}")
+        flash(("✅ WhatsApp inviato: " if ok else "❌ Errore: ") + msg,
+              "success" if ok else "danger")
+        return redirect(url_for("pec_detail", pid=pid))
+
     @app.route("/my-integrations/pec/test", methods=["POST"])
     @login_required
     def my_test_pec():

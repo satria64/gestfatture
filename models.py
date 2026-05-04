@@ -282,6 +282,9 @@ class AuditLog(db.Model):
             "2fa_setup_failed":  ("2FA setup fallita",   "warning"),
             "2fa_disable_failed": ("2FA disable fallita", "warning"),
             "2fa_codes_regenerated": ("2FA codici rigenerati", "info"),
+            "pec_notify_ok":     ("PEC notifica inviata", "success"),
+            "pec_notify_failed": ("PEC notifica fallita", "danger"),
+            "pec_notify_test":   ("PEC notifica test",    "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 

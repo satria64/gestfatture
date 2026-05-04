@@ -375,17 +375,52 @@ def _send_pec_whatsapp_to_owner(user, pec_msg) -> tuple[bool, str]:
 
 def notify_pec_message(user, pec_msg) -> dict:
     """Notifica titolare di una nuova PEC istituzionale."""
-    from models import db, UserSetting
+    from models import db, UserSetting, AuditLog
 
     result = {"email": None, "whatsapp": None}
 
-    if UserSetting.get(user.id, "notify_email_enabled") == "true" and user.email:
+    email_on = UserSetting.get(user.id, "notify_email_enabled") == "true"
+    wa_on    = UserSetting.get(user.id, "notify_whatsapp_enabled") == "true"
+
+    if email_on and user.email:
         result["email"] = _send_pec_email_to_owner(user, pec_msg)
-    if UserSetting.get(user.id, "notify_whatsapp_enabled") == "true":
+    if wa_on:
         result["whatsapp"] = _send_pec_whatsapp_to_owner(user, pec_msg)
 
     if any(r and r[0] for r in result.values() if r):
         pec_msg.notified_at = datetime.utcnow()
         db.session.commit()
+
+    # Audit log: utile per diagnosticare notifiche silently failed.
+    try:
+        details_parts = []
+        if email_on:
+            ok_e, msg_e = result["email"] or (False, "skipped: no email")
+            details_parts.append(f"email: {'OK' if ok_e else 'FAIL'} ({msg_e[:80]})")
+        else:
+            details_parts.append("email: disabled")
+        if wa_on:
+            ok_w, msg_w = result["whatsapp"] or (False, "skipped")
+            details_parts.append(f"wa: {'OK' if ok_w else 'FAIL'} ({msg_w[:80]})")
+        else:
+            details_parts.append("wa: disabled")
+
+        sender_label = pec_msg.sender_label or "?"
+        details = f"sender={sender_label}; " + " | ".join(details_parts)
+        ok_any = any(r and r[0] for r in result.values() if r)
+        action = "pec_notify_ok" if ok_any else "pec_notify_failed"
+        log_row = AuditLog(
+            user_id  = user.id,
+            username = user.username,
+            action   = action[:60],
+            target   = f"pec:{pec_msg.id}"[:200],
+            details  = details[:2000],
+        )
+        db.session.add(log_row)
+        db.session.commit()
+    except Exception as e:
+        log.warning("Audit log notify_pec fallito: %s", e)
+        try: db.session.rollback()
+        except Exception: pass
 
     return result

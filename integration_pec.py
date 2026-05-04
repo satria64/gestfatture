@@ -353,8 +353,11 @@ def sync_for_user(app, user_id: int):
                             except Exception:
                                 pass
                     except Exception as e:
-                        log.warning("PEC u=%d: Claude analysis fallita: %s", user_id, e)
-                        pec.summary = f"[Analisi AI fallita] {msg['subject']}"
+                        err_type = type(e).__name__
+                        log.warning("PEC u=%d: Claude analysis fallita (%s): %s",
+                                    user_id, err_type, e)
+                        # Salva il tipo di errore così è visibile nell'UI senza accedere ai log
+                        pec.summary = f"[Analisi AI fallita: {err_type}] {msg['subject']}"
                         pec.urgency = "media"
                 else:
                     # Fallback senza AI: euristica basica

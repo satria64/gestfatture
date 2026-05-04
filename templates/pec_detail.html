@@ -100,6 +100,15 @@
           </dd>
           {% endif %}
         </dl>
+
+        <hr class="my-3">
+        <p class="small text-muted mb-2">Test diretto della notifica WhatsApp con questa PEC:</p>
+        <form action="{{ url_for('pec_test_whatsapp', pid=m.id) }}" method="post">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-success btn-sm">
+            <i class="bi bi-whatsapp me-1"></i> Prova WhatsApp
+          </button>
+        </form>
       </div>
     </div>
 
