@@ -102,13 +102,20 @@
         </dl>
 
         <hr class="my-3">
-        <p class="small text-muted mb-2">Test diretto della notifica WhatsApp con questa PEC:</p>
-        <form action="{{ url_for('pec_test_whatsapp', pid=m.id) }}" method="post">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-outline-success btn-sm">
-            <i class="bi bi-whatsapp me-1"></i> Prova WhatsApp
-          </button>
-        </form>
+        <div class="d-flex gap-2 flex-wrap">
+          <form action="{{ url_for('pec_test_whatsapp', pid=m.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-success btn-sm">
+              <i class="bi bi-whatsapp me-1"></i> Prova WhatsApp
+            </button>
+          </form>
+          <form action="{{ url_for('pec_reanalyze', pid=m.id) }}" method="post">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-primary btn-sm">
+              <i class="bi bi-arrow-clockwise me-1"></i> Ri-analizza con AI
+            </button>
+          </form>
+        </div>
       </div>
     </div>
 

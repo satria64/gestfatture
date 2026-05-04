@@ -285,6 +285,7 @@ class AuditLog(db.Model):
             "pec_notify_ok":     ("PEC notifica inviata", "success"),
             "pec_notify_failed": ("PEC notifica fallita", "danger"),
             "pec_notify_test":   ("PEC notifica test",    "info"),
+            "pec_reanalyzed":    ("PEC ri-analizzata",    "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 

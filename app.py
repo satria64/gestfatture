@@ -1710,6 +1710,48 @@ def create_app():
               "success" if ok else "danger")
         return redirect(url_for("pec_detail", pid=pid))
 
+    @app.route("/pec/<int:pid>/reanalyze", methods=["POST"])
+    @login_required
+    @limiter.limit("5 per minute")
+    def pec_reanalyze(pid):
+        """Rilancia l'analisi AI su una PEC già salvata (usa i dati già in DB)."""
+        m = PecMessage.query.filter_by(id=pid, user_id=current_user.id).first_or_404()
+        api_key = AppSettings.get("anthropic_api_key", "")
+        if not api_key:
+            flash("API key Anthropic non configurata.", "danger")
+            return redirect(url_for("pec_detail", pid=pid))
+        try:
+            import json as _json
+            from datetime import datetime as _dt
+            from claude_service import analyze_pec_email, DEFAULT_MODEL
+            model = AppSettings.get("anthropic_model", "") or DEFAULT_MODEL
+            analysis = analyze_pec_email(
+                m.subject or "", m.body_excerpt or "", m.sender or "",
+                m.attachments_list, api_key, model,
+            )
+            m.category = (analysis.get("category", "altro") or "altro")[:50]
+            m.urgency  = (analysis.get("urgency", "media") or "media")[:20]
+            m.summary  = analysis.get("summary", "") or ""
+            m.suggested_action = analysis.get("suggested_action", "") or ""
+            m.key_facts = _json.dumps(analysis.get("key_facts", []))
+            if analysis.get("deadline"):
+                try:
+                    m.deadline = _dt.strptime(analysis["deadline"], "%Y-%m-%d").date()
+                except Exception:
+                    pass
+            db.session.commit()
+            audit("pec_reanalyzed", target=f"pec:{m.id}", details="OK")
+            flash("✅ Analisi AI rigenerata.", "success")
+        except Exception as e:
+            err_type = type(e).__name__
+            err_str  = str(e)[:300]
+            m.summary = f"[Analisi AI fallita: {err_type}: {err_str}] {m.subject or ''}"
+            db.session.commit()
+            audit("pec_reanalyzed", target=f"pec:{m.id}",
+                  details=f"FAIL {err_type}: {err_str[:120]}")
+            flash(f"❌ Analisi fallita: {err_type}: {err_str}", "danger")
+        return redirect(url_for("pec_detail", pid=pid))
+
     @app.route("/my-integrations/pec/test", methods=["POST"])
     @login_required
     def my_test_pec():
