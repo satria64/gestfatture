@@ -118,6 +118,26 @@ def run_daily_job(app):
         log.info("Scheduler – job completato.")
 
 
+def run_fiscal_notify(app):
+    """Job giornaliero: notifica scadenze fiscali a 7gg per ogni utente reale."""
+    with app.app_context():
+        from models import db, User, FiscalDeadline
+        from notification_service import notify_owner_of_fiscal_deadlines
+
+        # Solo utenti con almeno una scadenza fiscale
+        users = (User.query
+                 .filter(~User.username.like("ospite_%"))
+                 .join(FiscalDeadline, FiscalDeadline.user_id == User.id)
+                 .distinct().all())
+        for u in users:
+            try:
+                res = notify_owner_of_fiscal_deadlines(u, db, days_ahead=7)
+                if res["count"]:
+                    log.info("Fiscal notify u=%s: %d scadenze notificate", u.username, res["count"])
+            except Exception as e:
+                log.error("Fiscal notify u=%s fallita: %s", u.username, e)
+
+
 def _wrap_integration_sync(app, module_name: str):
     """Wrapper sicuro che cattura le eccezioni dei job di integrazione."""
     def runner():
@@ -266,6 +286,17 @@ def start_scheduler(app):
         args=[app],
         trigger=CronTrigger(hour=6, minute=0),
         id="bandi_sync",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Scadenze fiscali notify alle 08:30 (dopo i solleciti)
+    _scheduler.add_job(
+        func=run_fiscal_notify,
+        args=[app],
+        trigger=CronTrigger(hour=8, minute=30),
+        id="fiscal_notify",
         replace_existing=True,
         max_instances=1,
         coalesce=True,

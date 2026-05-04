@@ -359,6 +359,145 @@ def notify_owner_of_bank_reconciliation(user, db, auto_matched: list, pending_co
     return result
 
 
+# ─── Notifiche SCADENZE FISCALI ─────────────────────────────────────────────
+def notify_owner_of_fiscal_deadlines(user, db, days_ahead: int = 7) -> dict:
+    """Notifica titolare delle scadenze fiscali nei prossimi N giorni
+    non ancora notificate."""
+    from models import FiscalDeadline, UserSetting, AppSettings, AuditLog
+    from datetime import date as _d, timedelta as _td
+
+    today = _d.today()
+    cutoff = today + _td(days=days_ahead)
+    items = (FiscalDeadline.query
+             .filter_by(user_id=user.id, completed=False)
+             .filter(FiscalDeadline.notified_at.is_(None))
+             .filter(FiscalDeadline.deadline >= today)
+             .filter(FiscalDeadline.deadline <= cutoff)
+             .order_by(FiscalDeadline.deadline.asc())
+             .all())
+    result = {"count": len(items), "email": None, "whatsapp": None}
+    if not items:
+        return result
+
+    email_on = UserSetting.get(user.id, "notify_email_enabled") == "true"
+    wa_on    = UserSetting.get(user.id, "notify_whatsapp_enabled") == "true"
+    base_url = AppSettings.get("app_external_url", "http://127.0.0.1:5000").rstrip("/")
+    company  = (UserSetting.get(user.id, "company_name")
+                or AppSettings.get("company_name", "GestFatture"))
+
+    if email_on and user.email:
+        cfg = {"user": AppSettings.get("smtp_user", "")}
+        if cfg["user"]:
+            rows_html = ""
+            for x in items:
+                amt = f"€ {x.amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".") if x.amount else "—"
+                cl = x.category_label
+                rows_html += f"""<tr>
+                  <td style="padding:10px;border-bottom:1px solid #e5e7eb">
+                    <strong>{x.title}</strong>
+                    <div style="font-size:11px;color:#6b7280;margin-top:2px">{cl[0]}</div>
+                  </td>
+                  <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:center">
+                    <strong style="color:#dc2626">{x.deadline.strftime('%d/%m/%Y')}</strong>
+                    <div style="font-size:11px;color:#dc2626">{x.days_until} giorni</div>
+                  </td>
+                  <td style="padding:10px;border-bottom:1px solid #e5e7eb;text-align:right">{amt}</td>
+                </tr>"""
+            n = len(items)
+            subj = f"⏰ {n} scadenz{'e' if n != 1 else 'a'} fiscal{'i' if n != 1 else 'e'} entro {days_ahead}gg"
+            html = f"""<!DOCTYPE html><html lang="it"><head><meta charset="utf-8"></head>
+<body style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;background:#f8fafc;padding:20px">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,.05)">
+    <div style="background:#dc2626;color:#fff;padding:20px">
+      <h2 style="margin:0">⏰ Scadenze fiscali in arrivo</h2>
+      <p style="margin:6px 0 0;opacity:.85;font-size:13px">{company}</p>
+    </div>
+    <div style="padding:24px">
+      <p>Ciao <strong>{user.username}</strong>,</p>
+      <p>Hai <strong>{n} scadenza/e fiscale/i</strong> nei prossimi <strong>{days_ahead} giorni</strong>:</p>
+      <table style="width:100%;border-collapse:collapse;margin:12px 0">
+        <thead>
+          <tr style="background:#f3f4f6">
+            <th style="padding:8px;text-align:left;font-size:12px">Cosa</th>
+            <th style="padding:8px;text-align:center;font-size:12px">Quando</th>
+            <th style="padding:8px;text-align:right;font-size:12px">Importo</th>
+          </tr>
+        </thead>
+        <tbody>{rows_html}</tbody>
+      </table>
+      <p style="text-align:center;margin:24px 0">
+        <a href="{base_url}/fiscal"
+           style="background:#dc2626;color:#fff;padding:12px 28px;border-radius:6px;
+                  text-decoration:none;font-weight:bold;display:inline-block">
+          Vai al calendario fiscale →
+        </a>
+      </p>
+    </div>
+  </div>
+</body></html>"""
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subj
+            msg["From"]    = f"{company} <{cfg['user']}>"
+            msg["To"]      = user.email
+            msg.attach(MIMEText(html, "html", "utf-8"))
+            try:
+                from email_service import deliver_email
+                ok, info = deliver_email(
+                    msg=msg, subject=subj, recipient=user.email,
+                    html=html, plain="",
+                    sender_name=company, sender_email=cfg["user"],
+                )
+                result["email"] = (ok, info)
+            except Exception as e:
+                result["email"] = (False, str(e))
+
+    if wa_on:
+        phone  = (user.phone or "").strip()
+        apikey = UserSetting.get(user.id, "whatsapp_apikey", "").strip()
+        if phone and apikey:
+            phone_clean = phone.lstrip("+").replace(" ", "")
+            lines = [f"⏰ *{len(items)} scadenz{'e' if len(items) != 1 else 'a'} fiscal{'i' if len(items) != 1 else 'e'}* entro {days_ahead}gg:\n"]
+            for x in items[:5]:
+                amt = f" €{int(x.amount):,}".replace(",", ".") if x.amount else ""
+                lines.append(f"• *{x.deadline.strftime('%d/%m')}* {x.title[:60]}{amt}")
+            if len(items) > 5:
+                lines.append(f"\n…e altre {len(items)-5}.")
+            lines.append(f"\n👉 {base_url}/fiscal")
+            text = "\n".join(lines)
+            try:
+                r = requests.get(
+                    "https://api.callmebot.com/whatsapp.php",
+                    params={"phone": phone_clean, "text": text, "apikey": apikey},
+                    timeout=15,
+                )
+                ok = r.status_code == 200 and any(k in r.text.lower() for k in ("queued", "sent", "ok"))
+                result["whatsapp"] = (ok, "OK" if ok else _clean_callmebot_response(r.text)[:200])
+            except Exception as e:
+                result["whatsapp"] = (False, str(e))
+
+    # Marca notificate
+    sent_any = any(r and r[0] for r in result.values() if isinstance(r, tuple))
+    if sent_any:
+        now = datetime.utcnow()
+        for x in items:
+            x.notified_at = now
+        db.session.commit()
+
+    try:
+        details = f"n={len(items)}; email={'OK' if result['email'] and result['email'][0] else 'no'}; wa={'OK' if result['whatsapp'] and result['whatsapp'][0] else 'no'}"
+        db.session.add(AuditLog(
+            user_id=user.id, username=user.username,
+            action="fiscal_notify", target=f"days_ahead:{days_ahead}",
+            details=details[:2000],
+        ))
+        db.session.commit()
+    except Exception:
+        try: db.session.rollback()
+        except Exception: pass
+
+    return result
+
+
 # ─── Notifiche digest BANDI di finanziamento ─────────────────────────────────
 def _send_bandi_email_digest(user, matches) -> tuple[bool, str]:
     """Email digest al titolare con i nuovi bandi rilevanti."""

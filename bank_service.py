@@ -231,6 +231,26 @@ def sync_account(db, bank_account, days_back: int = 30) -> dict:
     stats = {"new": 0, "errors": 0}
     try:
         token = _ensure_fresh_token(bank_account)
+        # Aggiorna saldo (booked balance) — necessario per il cash flow forecast
+        try:
+            accs = list_user_accounts(token)
+            for acc in accs:
+                if acc.get("id") == bank_account.external_account_id:
+                    bal_obj = ((acc.get("balances", {}) or {}).get("booked", {}) or {}).get("amount", {})
+                    val_obj = bal_obj.get("value", {}) or {}
+                    if val_obj:
+                        try:
+                            unscaled = float(val_obj.get("unscaledValue", 0))
+                            scale = int(val_obj.get("scale", 2))
+                            bank_account.last_balance = unscaled / (10 ** scale)
+                            bank_account.last_balance_at = datetime.utcnow()
+                        except Exception:
+                            pass
+                    break
+        except Exception as e:
+            log.warning("Balance fetch fallito per acc=%s: %s",
+                        bank_account.external_account_id, e)
+
         date_from = (date.today() - timedelta(days=days_back))
         if bank_account.last_sync_at:
             date_from = max(date_from, bank_account.last_sync_at.date() - timedelta(days=2))

@@ -330,6 +330,8 @@ class AuditLog(db.Model):
             "bank_match_manual":  ("Banca: match manuale", "primary"),
             "bank_ignore":        ("Banca: tx ignorata",   "secondary"),
             "bank_recon_notify":  ("Banca: notifica digest","primary"),
+            "fiscal_seed_it":     ("Scadenze fiscali IT caricate", "info"),
+            "fiscal_notify":      ("Scadenze fiscali notificate",  "primary"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 
@@ -604,6 +606,9 @@ class BankAccount(db.Model):
     access_token         = db.Column(db.Text, default="")
     refresh_token        = db.Column(db.Text, default="")
     token_expires_at     = db.Column(db.DateTime, nullable=True)
+    # Saldo conto (booked balance) aggiornato a ogni sync — usato dal cash flow forecast
+    last_balance         = db.Column(db.Float, nullable=True)
+    last_balance_at      = db.Column(db.DateTime, nullable=True)
     created_at           = db.Column(db.DateTime, default=datetime.utcnow)
 
     transactions = db.relationship("BankTransaction", back_populates="account",
@@ -670,6 +675,62 @@ class BankTransaction(db.Model):
             "ignored":        ("Ignorata",         "secondary"),
             "non_invoice":    ("Non fattura",      "secondary"),
         }.get(self.status, ("?", "secondary"))
+
+
+class FiscalDeadline(db.Model):
+    """Scadenza fiscale (IVA, F24, contributi, dichiarazioni, CCIAA, ecc.)
+    per ogni utente. Ricorrenze gestite generando istanze future al completamento."""
+    __tablename__ = "fiscal_deadlines"
+
+    id           = db.Column(db.Integer, primary_key=True)
+    user_id      = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False, index=True)
+    title        = db.Column(db.String(200), nullable=False)
+    deadline     = db.Column(db.Date, nullable=False, index=True)
+    category     = db.Column(db.String(40), default="altro")
+    # iva_mensile / iva_trimestrale / f24 / inps / inail / cciaa / dichiarazione / altro
+    amount       = db.Column(db.Float, nullable=True)  # importo da versare (opzionale)
+    notes        = db.Column(db.Text, default="")
+    is_recurring = db.Column(db.Boolean, default=False, nullable=False)
+    recurrence   = db.Column(db.String(20), default="")  # monthly / quarterly / yearly
+    completed    = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    completed_at = db.Column(db.DateTime, nullable=True)
+    notified_at  = db.Column(db.DateTime, nullable=True)
+    created_at   = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def days_until(self):
+        return (self.deadline - date.today()).days
+
+    @property
+    def status_label(self):
+        if self.completed:
+            return ("Completata", "success")
+        d = self.days_until
+        if d < 0:
+            return (f"In ritardo +{-d}gg", "danger")
+        if d == 0:
+            return ("Oggi!", "danger")
+        if d <= 3:
+            return (f"{d}gg", "danger")
+        if d <= 14:
+            return (f"{d}gg", "warning")
+        return (f"{d}gg", "secondary")
+
+    @property
+    def category_label(self):
+        return {
+            "iva_mensile":    ("📊 IVA mensile",       "primary"),
+            "iva_trimestrale":("📊 IVA trimestrale",   "primary"),
+            "f24":            ("🏛 F24",               "info"),
+            "inps":           ("👥 INPS",              "warning"),
+            "inail":          ("🛡 INAIL",             "warning"),
+            "cciaa":          ("🏢 CCIAA",             "secondary"),
+            "dichiarazione":  ("📄 Dichiarazione",     "info"),
+            "770":            ("📄 770",               "info"),
+            "intrastat":      ("🌍 Intrastat",         "info"),
+            "lipe":           ("📊 LIPE (IVA periodica)","primary"),
+            "altro":          ("📌 Altro",             "secondary"),
+        }.get(self.category, ("📌 Altro", "secondary"))
 
 
 class AppSettings(db.Model):

@@ -14,7 +14,8 @@ from flask_limiter.util import get_remote_address
 
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
                     User, PecMessage, SupportTicket, TicketMessage, AuditLog,
-                    Bando, BandoMatch, BankAccount, BankTransaction)
+                    Bando, BandoMatch, BankAccount, BankTransaction,
+                    FiscalDeadline)
 from auth import login_manager
 from config import config
 
@@ -1121,6 +1122,389 @@ def create_app():
             payable_paid_30d=payable_paid_30d,
             upcoming_payables=upcoming_payables,
             net_position=net_position,
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # SALUTE AZIENDALE (vista executive: tutto a colpo d'occhio)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/health")
+    @login_required
+    def health_overview():
+        """Quadro generale: liquidità, fatture, pagamenti, fiscale, bandi, ticket."""
+        today = date.today()
+        uid = current_user.id
+
+        # ── Banche (saldo attuale) ──────────────────────────────────────────
+        bank_accounts = BankAccount.query.filter_by(user_id=uid, status="linked").all()
+        starting_balance = sum(a.last_balance or 0 for a in bank_accounts
+                               if a.last_balance is not None)
+        has_balance = any(a.last_balance is not None for a in bank_accounts)
+
+        # ── Fatture aperte (attive) ─────────────────────────────────────────
+        for inv in my_invoices().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            inv.update_status()
+        for inv in my_payables().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            inv.update_status()
+        db.session.commit()
+
+        active_open_amount = (db.session.query(db.func.sum(Invoice.amount))
+                              .filter_by(user_id=uid, is_passive=False)
+                              .filter(Invoice.status.in_(["pending", "overdue"]))
+                              .filter(db.or_(Invoice.document_type != "TD04",
+                                             Invoice.document_type.is_(None)))
+                              .scalar() or 0)
+        active_overdue_amount = (db.session.query(db.func.sum(Invoice.amount))
+                                 .filter_by(user_id=uid, is_passive=False, status="overdue")
+                                 .scalar() or 0)
+        active_overdue_count = my_invoices().filter_by(status="overdue").count()
+
+        # ── Pagamenti (passive) ─────────────────────────────────────────────
+        passive_open_amount = (db.session.query(db.func.sum(Invoice.amount))
+                               .filter_by(user_id=uid, is_passive=True)
+                               .filter(Invoice.status.in_(["pending", "overdue"]))
+                               .scalar() or 0)
+        passive_overdue_amount = (db.session.query(db.func.sum(Invoice.amount))
+                                  .filter_by(user_id=uid, is_passive=True, status="overdue")
+                                  .scalar() or 0)
+        passive_overdue_count = my_payables().filter_by(status="overdue").count()
+
+        # ── Saldo netto previsto ────────────────────────────────────────────
+        net_position = starting_balance + active_open_amount - passive_open_amount
+
+        # ── Prossimi 7gg: pagamenti + scadenze fiscali ──────────────────────
+        next_7d = today + timedelta(days=7)
+        upcoming_payables = (my_payables()
+                             .filter(Invoice.status.in_(["pending", "overdue"]))
+                             .filter(Invoice.due_date <= next_7d)
+                             .order_by(Invoice.due_date).limit(10).all())
+        upcoming_active = (my_invoices()
+                           .filter(Invoice.status.in_(["pending", "overdue"]))
+                           .filter(Invoice.due_date <= next_7d)
+                           .order_by(Invoice.due_date).limit(10).all())
+
+        # ── Scadenze fiscali (prossimi 30gg) ────────────────────────────────
+        upcoming_fiscal = (FiscalDeadline.query
+                           .filter_by(user_id=uid, completed=False)
+                           .filter(FiscalDeadline.deadline >= today)
+                           .filter(FiscalDeadline.deadline <= today + timedelta(days=30))
+                           .order_by(FiscalDeadline.deadline).limit(10).all())
+        fiscal_overdue = (FiscalDeadline.query
+                          .filter_by(user_id=uid, completed=False)
+                          .filter(FiscalDeadline.deadline < today).count())
+
+        # ── Bandi rilevanti ─────────────────────────────────────────────────
+        top_bandi = (db.session.query(Bando, BandoMatch)
+                     .join(BandoMatch, BandoMatch.bando_id == Bando.id)
+                     .filter(BandoMatch.user_id == uid,
+                             BandoMatch.is_dismissed.is_not(True),
+                             Bando.is_active.is_(True),
+                             BandoMatch.relevance_score >= 60)
+                     .order_by(BandoMatch.relevance_score.desc())
+                     .limit(5).all())
+
+        # ── Ticket aperti ───────────────────────────────────────────────────
+        open_tickets = (SupportTicket.query.filter_by(user_id=uid)
+                        .filter(SupportTicket.status.in_(["open", "in_progress", "waiting_user"]))
+                        .count())
+
+        # ── Riconciliazione bancaria pending ────────────────────────────────
+        bank_pending = BankTransaction.query.filter_by(
+            user_id=uid, status="pending"
+        ).filter(BankTransaction.amount > 0).count()
+
+        # ── Alert critici ───────────────────────────────────────────────────
+        alerts = []
+        if net_position < 0:
+            alerts.append({
+                "level": "danger", "icon": "exclamation-octagon",
+                "msg": f"Saldo netto previsto negativo: {net_position:+,.2f} €. Considera di sollecitare incassi o rimandare uscite.".replace(",", "X").replace(".", ",").replace("X", "."),
+                "action_url": url_for("cash_flow"), "action_label": "Vedi cash flow",
+            })
+        if active_overdue_count >= 3:
+            alerts.append({
+                "level": "warning", "icon": "exclamation-triangle",
+                "msg": f"{active_overdue_count} fatture attive sono scadute. Solleciti automatici attivi, ma controlla.",
+                "action_url": url_for("invoices") + "?status=overdue", "action_label": "Vedi scadute",
+            })
+        if passive_overdue_count >= 1:
+            alerts.append({
+                "level": "danger", "icon": "credit-card",
+                "msg": f"{passive_overdue_count} pagamenti in ritardo verso fornitori — €{passive_overdue_amount:,.2f}".replace(",", "X").replace(".", ",").replace("X", "."),
+                "action_url": url_for("payables") + "?status=open", "action_label": "Vedi pagamenti",
+            })
+        if fiscal_overdue:
+            alerts.append({
+                "level": "danger", "icon": "calendar-x",
+                "msg": f"{fiscal_overdue} scadenze fiscali in ritardo!",
+                "action_url": url_for("fiscal_deadlines"), "action_label": "Vedi scadenze",
+            })
+        if not has_balance and bank_accounts:
+            alerts.append({
+                "level": "info", "icon": "info-circle",
+                "msg": "Saldi banche non aggiornati. Sincronizza per avere un saldo netto reale.",
+                "action_url": url_for("bank_overview"), "action_label": "Vai alle banche",
+            })
+
+        return render_template("health.html",
+            starting_balance=starting_balance,
+            has_balance=has_balance,
+            bank_accounts=bank_accounts,
+            active_open_amount=active_open_amount,
+            active_overdue_amount=active_overdue_amount,
+            active_overdue_count=active_overdue_count,
+            passive_open_amount=passive_open_amount,
+            passive_overdue_amount=passive_overdue_amount,
+            passive_overdue_count=passive_overdue_count,
+            net_position=net_position,
+            upcoming_payables=upcoming_payables,
+            upcoming_active=upcoming_active,
+            upcoming_fiscal=upcoming_fiscal,
+            fiscal_overdue=fiscal_overdue,
+            top_bandi=top_bandi,
+            open_tickets=open_tickets,
+            bank_pending=bank_pending,
+            alerts=alerts,
+            today=today,
+        )
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CALENDARIO SCADENZE FISCALI
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/fiscal")
+    @login_required
+    def fiscal_deadlines():
+        status = request.args.get("status", "open")  # open / completed / all
+        q = FiscalDeadline.query.filter_by(user_id=current_user.id)
+        if status == "open":
+            q = q.filter_by(completed=False)
+        elif status == "completed":
+            q = q.filter_by(completed=True)
+        items = q.order_by(FiscalDeadline.deadline.asc()).all()
+        # KPI
+        all_open = FiscalDeadline.query.filter_by(user_id=current_user.id, completed=False).all()
+        kpi = {
+            "open":     len(all_open),
+            "overdue":  sum(1 for x in all_open if x.days_until < 0),
+            "this_week": sum(1 for x in all_open if 0 <= x.days_until <= 7),
+            "this_month": sum(1 for x in all_open if 0 <= x.days_until <= 30),
+        }
+        return render_template("fiscal_deadlines.html", items=items, status=status, kpi=kpi)
+
+    @app.route("/fiscal/new", methods=["GET", "POST"])
+    @login_required
+    def new_fiscal_deadline():
+        if request.method == "POST":
+            try:
+                amt = request.form.get("amount", "").strip().replace(",", ".")
+                amount = float(amt) if amt else None
+            except ValueError:
+                amount = None
+            d = FiscalDeadline(
+                user_id=current_user.id,
+                title=request.form["title"][:200],
+                deadline=datetime.strptime(request.form["deadline"], "%Y-%m-%d").date(),
+                category=request.form.get("category", "altro")[:40],
+                amount=amount,
+                notes=request.form.get("notes", ""),
+                is_recurring=request.form.get("is_recurring") == "on",
+                recurrence=request.form.get("recurrence", "")[:20],
+            )
+            db.session.add(d); db.session.commit()
+            flash("Scadenza aggiunta.", "success")
+            return redirect(url_for("fiscal_deadlines"))
+        return render_template("new_fiscal_deadline.html",
+                               today_iso=date.today().isoformat())
+
+    @app.route("/fiscal/<int:fid>/complete", methods=["POST"])
+    @login_required
+    def fiscal_complete(fid):
+        d = FiscalDeadline.query.filter_by(id=fid, user_id=current_user.id).first_or_404()
+        d.completed = True
+        d.completed_at = datetime.utcnow()
+        # Se ricorrente, genera la prossima istanza
+        if d.is_recurring and d.recurrence:
+            from dateutil.relativedelta import relativedelta
+            try:
+                if d.recurrence == "monthly":
+                    next_d = d.deadline + relativedelta(months=1)
+                elif d.recurrence == "quarterly":
+                    next_d = d.deadline + relativedelta(months=3)
+                elif d.recurrence == "yearly":
+                    next_d = d.deadline + relativedelta(years=1)
+                else:
+                    next_d = None
+                if next_d:
+                    db.session.add(FiscalDeadline(
+                        user_id=current_user.id, title=d.title,
+                        deadline=next_d, category=d.category,
+                        amount=d.amount, notes=d.notes,
+                        is_recurring=True, recurrence=d.recurrence,
+                    ))
+            except ImportError:
+                # dateutil non disponibile (improbabile, è dep di anthropic), fallback manuale
+                pass
+        db.session.commit()
+        flash(f"✅ Scadenza '{d.title}' marcata come completata.", "success")
+        return redirect(url_for("fiscal_deadlines"))
+
+    @app.route("/fiscal/<int:fid>/delete", methods=["POST"])
+    @login_required
+    def fiscal_delete(fid):
+        d = FiscalDeadline.query.filter_by(id=fid, user_id=current_user.id).first_or_404()
+        db.session.delete(d); db.session.commit()
+        flash("Scadenza eliminata.", "info")
+        return redirect(url_for("fiscal_deadlines"))
+
+    @app.route("/fiscal/seed-it", methods=["POST"])
+    @login_required
+    def fiscal_seed_it():
+        """Popola le scadenze italiane standard per l'anno in corso (idempotente)."""
+        from datetime import date as _d
+        year = _d.today().year
+        # Lista scadenze fisse italiane (semplificate, regime ordinario)
+        templates = [
+            # IVA mensile (versamento il 16 di ogni mese)
+            *[(_d(year, m, 16), f"IVA mensile {_d(year, m, 1).strftime('%B').capitalize()} {year}",
+               "iva_mensile", "monthly") for m in range(1, 13)],
+            # IVA trimestrale (16 maggio/agosto/novembre/febbraio successivo)
+            (_d(year, 5, 16),  f"IVA 1° trimestre {year}", "iva_trimestrale", "quarterly"),
+            (_d(year, 8, 16),  f"IVA 2° trimestre {year}", "iva_trimestrale", "quarterly"),
+            (_d(year, 11, 16), f"IVA 3° trimestre {year}", "iva_trimestrale", "quarterly"),
+            # F24 ritenute lavoratori (16 di ogni mese — già coperto da IVA mensile)
+            # INPS commercianti/artigiani (16 maggio/agosto/novembre/febbraio)
+            (_d(year, 5, 16),  f"INPS artigiani 1ª rata {year}", "inps", "yearly"),
+            (_d(year, 8, 20),  f"INPS artigiani 2ª rata {year}", "inps", "yearly"),
+            (_d(year, 11, 16), f"INPS artigiani 3ª rata {year}", "inps", "yearly"),
+            # INAIL autoliquidazione
+            (_d(year, 2, 16),  f"INAIL autoliquidazione {year}", "inail", "yearly"),
+            # CCIAA diritto annuale
+            (_d(year, 6, 30),  f"Diritto annuale CCIAA {year}", "cciaa", "yearly"),
+            # LIPE Liquidazione IVA Periodica trimestrale
+            (_d(year, 5, 31),  f"LIPE 1° trim {year}",  "lipe", "yearly"),
+            (_d(year, 9, 16),  f"LIPE 2° trim {year}",  "lipe", "yearly"),
+            (_d(year, 11, 30), f"LIPE 3° trim {year}",  "lipe", "yearly"),
+            # Acconti IRPEF
+            (_d(year, 6, 30),  f"1° acconto IRPEF {year}", "f24", "yearly"),
+            (_d(year, 11, 30), f"2° acconto IRPEF {year}", "f24", "yearly"),
+            # Dichiarazione redditi
+            (_d(year, 11, 30), f"Dichiarazione redditi {year}", "dichiarazione", "yearly"),
+            # 770 sostituti d'imposta
+            (_d(year, 10, 31), f"Mod. 770 - sostituti d'imposta {year}", "770", "yearly"),
+        ]
+        added = 0
+        skipped = 0
+        for dl_date, title, cat, recur in templates:
+            # Skip se già presente (idempotente per title+deadline)
+            if FiscalDeadline.query.filter_by(
+                user_id=current_user.id, title=title, deadline=dl_date
+            ).first():
+                skipped += 1
+                continue
+            db.session.add(FiscalDeadline(
+                user_id=current_user.id, title=title, deadline=dl_date,
+                category=cat, is_recurring=True, recurrence=recur,
+            ))
+            added += 1
+        db.session.commit()
+        audit("fiscal_seed_it", details=f"added={added}, skipped={skipped}")
+        flash(f"✅ Caricate {added} scadenze italiane standard ({skipped} già presenti).",
+              "success")
+        return redirect(url_for("fiscal_deadlines"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
+    # CASH FLOW FORECAST (proiezione liquidità 90gg)
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/cash-flow")
+    @login_required
+    def cash_flow():
+        """Pagina previsione liquidità: settimanale per 12 settimane (~3 mesi).
+        Combina saldo banche + fatture aperte attive (entrate previste) +
+        fatture passive aperte (uscite previste)."""
+        today = date.today()
+        weeks = 12
+
+        # Saldo iniziale: somma saldi banche linked
+        accounts = (BankAccount.query.filter_by(user_id=current_user.id, status="linked")
+                    .filter(BankAccount.last_balance.isnot(None)).all())
+        starting_balance = sum(a.last_balance or 0 for a in accounts)
+        has_balance_data = bool(accounts)
+
+        # Aggiorna stato fatture aperte
+        for inv in my_invoices().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            inv.update_status()
+        for inv in my_payables().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            inv.update_status()
+        db.session.commit()
+
+        # Buckets settimanali: lunedi → domenica
+        from collections import defaultdict
+        # Trova il prossimo lunedi (o oggi se è lunedi)
+        week_start = today - timedelta(days=today.weekday())  # lunedi corrente
+        buckets_in  = defaultdict(float)
+        buckets_out = defaultdict(float)
+        overdue_in_total  = 0.0
+        overdue_out_total = 0.0
+
+        # Fatture attive aperte: entrata prevista alla due_date
+        for inv in my_invoices().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            if inv.is_credit_note:
+                continue
+            if inv.due_date < week_start:
+                overdue_in_total += inv.amount
+                continue
+            week_idx = (inv.due_date - week_start).days // 7
+            if 0 <= week_idx < weeks:
+                buckets_in[week_idx] += inv.amount
+
+        # Fatture passive aperte: uscita prevista alla due_date
+        for inv in my_payables().filter(Invoice.status.in_(["pending", "overdue"])).all():
+            if inv.due_date < week_start:
+                overdue_out_total += inv.amount
+                continue
+            week_idx = (inv.due_date - week_start).days // 7
+            if 0 <= week_idx < weeks:
+                buckets_out[week_idx] += inv.amount
+
+        # Costruisci righe: saldo cumulativo settimana per settimana
+        # Saldo iniziale = saldo banche - già scaduti uscite + già scaduti entrate
+        # (assumendo che gli scaduti vengano "regolati subito" all'inizio)
+        cumulative = starting_balance + overdue_in_total - overdue_out_total
+        rows = []
+        for w in range(weeks):
+            wk_start = week_start + timedelta(weeks=w)
+            wk_end   = wk_start + timedelta(days=6)
+            inflow  = buckets_in.get(w, 0)
+            outflow = buckets_out.get(w, 0)
+            net     = inflow - outflow
+            cumulative += net
+            rows.append({
+                "week_start": wk_start,
+                "week_end":   wk_end,
+                "label":      f"{wk_start.strftime('%d/%m')} – {wk_end.strftime('%d/%m')}",
+                "inflow":     inflow,
+                "outflow":    outflow,
+                "net":        net,
+                "cumulative": cumulative,
+                "is_negative": cumulative < 0,
+            })
+
+        # Min cumulativo (peggiore proiezione) per allerta visiva
+        min_cumulative = min((r["cumulative"] for r in rows), default=cumulative)
+        # Max abs per scaling barre
+        max_abs = max(
+            [abs(r["inflow"]) for r in rows] + [abs(r["outflow"]) for r in rows] + [1]
+        )
+
+        return render_template("cash_flow.html",
+            rows=rows,
+            starting_balance=starting_balance,
+            has_balance_data=has_balance_data,
+            accounts=accounts,
+            overdue_in=overdue_in_total,
+            overdue_out=overdue_out_total,
+            min_cumulative=min_cumulative,
+            max_abs=max_abs,
+            today=today,
         )
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2987,6 +3371,14 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN token_expires_at DATETIME"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna bank_accounts.token_expires_at")
+            if "last_balance" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN last_balance REAL"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.last_balance")
+            if "last_balance_at" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN last_balance_at DATETIME"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.last_balance_at")
 
         # ── Multi-tenant: user_id su clients e invoices ──────────────────────
         admin_id_row = conn.execute(text("SELECT MIN(id) FROM users WHERE is_admin = 1")).fetchone()

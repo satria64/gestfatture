@@ -46,9 +46,27 @@
     <hr class="d-none d-md-block">
     <ul class="nav nav-pills flex-column mb-auto gap-1">
       <li>
+        <a href="{{ url_for('health_overview') }}"
+           class="nav-link text-white {% if request.endpoint=='health_overview' %}active{% endif %}">
+          <i class="bi bi-heart-pulse me-2"></i> Quadro generale
+        </a>
+      </li>
+      <li>
         <a href="{{ url_for('dashboard') }}"
            class="nav-link text-white {% if request.endpoint=='dashboard' %}active{% endif %}">
           <i class="bi bi-speedometer2 me-2"></i> Dashboard
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('cash_flow') }}"
+           class="nav-link text-white {% if request.endpoint=='cash_flow' %}active{% endif %}">
+          <i class="bi bi-graph-up-arrow me-2"></i> Cash flow
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('fiscal_deadlines') }}"
+           class="nav-link text-white {% if 'fiscal' in (request.endpoint or '') %}active{% endif %}">
+          <i class="bi bi-calendar2-event me-2"></i> Scadenze fiscali
         </a>
       </li>
       <li>

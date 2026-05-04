@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Cash Flow – GestFatture{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+  <h2><i class="bi bi-graph-up-arrow me-2"></i>Previsione liquidità</h2>
+  <p class="text-muted small mb-0">
+    Proiezione del saldo settimanale per le prossime 12 settimane (~3 mesi).
+    Combina saldi banche + fatture aperte (entrate) + fatture passive aperte (uscite).
+  </p>
+</div>
+
+<!-- Stato dati -->
+{% if not has_balance_data %}
+<div class="alert alert-warning d-flex align-items-start gap-2">
+  <i class="bi bi-exclamation-triangle fs-4"></i>
+  <div>
+    <strong>Saldi banche non disponibili</strong> — il punto di partenza è 0.
+    <a href="{{ url_for('bank_overview') }}">Collega una banca via Tink</a> e clicca
+    "Sincronizza" per avere il saldo iniziale reale e una previsione attendibile.
+  </div>
+</div>
+{% endif %}
+
+<!-- Saldo iniziale + scaduti -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-body py-3">
+    <div class="row g-3 align-items-center">
+      <div class="col-md-3">
+        <small class="text-muted">Saldo iniziale (banche)</small>
+        <div class="fs-4 fw-bold">{{ starting_balance | eur }}</div>
+        {% if accounts %}<small class="text-muted">{{ accounts|length }} conto/i</small>{% endif %}
+      </div>
+      <div class="col-md-3">
+        <small class="text-muted">+ Scaduti da incassare</small>
+        <div class="fs-4 fw-bold text-success">{{ overdue_in | eur }}</div>
+      </div>
+      <div class="col-md-3">
+        <small class="text-muted">− Scaduti da pagare</small>
+        <div class="fs-4 fw-bold text-danger">{{ overdue_out | eur }}</div>
+      </div>
+      <div class="col-md-3">
+        <small class="text-muted">Saldo previsto a 90gg</small>
+        <div class="fs-4 fw-bold {{ 'text-danger' if rows[-1].cumulative < 0 else 'text-success' }}">
+          {{ rows[-1].cumulative | eur }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% if min_cumulative < 0 %}
+<div class="alert alert-danger d-flex align-items-start gap-2">
+  <i class="bi bi-exclamation-octagon fs-4"></i>
+  <div>
+    <strong>Attenzione liquidità!</strong> Nei prossimi 90 giorni il saldo
+    previsto scende fino a <strong>{{ min_cumulative | eur }}</strong>. Considera di
+    sollecitare i pagamenti o rimandare uscite non urgenti.
+  </div>
+</div>
+{% endif %}
+
+<!-- Tabella settimanale -->
+<div class="card border-0 shadow-sm">
+  <div class="card-header fw-semibold">Proiezione settimanale</div>
+  <div class="card-body p-0">
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Settimana</th>
+          <th class="text-end">Entrate</th>
+          <th class="text-end">Uscite</th>
+          <th class="text-end">Variazione</th>
+          <th class="text-end">Saldo cumulativo</th>
+          <th style="width:30%">Visual</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr {% if r.is_negative %}class="table-danger"{% endif %}>
+          <td><strong>{{ r.label }}</strong></td>
+          <td class="text-end {% if r.inflow > 0 %}text-success{% endif %}">
+            {% if r.inflow > 0 %}+{{ r.inflow | eur }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end {% if r.outflow > 0 %}text-danger{% endif %}">
+            {% if r.outflow > 0 %}−{{ r.outflow | eur }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end fw-semibold {{ 'text-success' if r.net > 0 else ('text-danger' if r.net < 0 else 'text-muted') }}">
+            {% if r.net > 0 %}+{{ r.net | eur }}{% elif r.net < 0 %}−{{ (-r.net) | eur }}{% else %}—{% endif %}
+          </td>
+          <td class="text-end fw-bold {{ 'text-danger' if r.is_negative else '' }}">
+            {{ r.cumulative | eur }}
+          </td>
+          <td>
+            <!-- Mini grafico in/out come barre orizzontali -->
+            <div style="position:relative; height:18px">
+              {% if r.inflow > 0 %}
+              <div style="position:absolute;left:50%;height:9px;background:#16a34a;border-radius:0 3px 3px 0;
+                          width:{{ (r.inflow / max_abs * 50)|round(0) }}%"
+                   title="Entrate {{ r.inflow | eur }}"></div>
+              {% endif %}
+              {% if r.outflow > 0 %}
+              <div style="position:absolute;right:50%;top:9px;height:9px;background:#dc2626;border-radius:3px 0 0 3px;
+                          width:{{ (r.outflow / max_abs * 50)|round(0) }}%"
+                   title="Uscite {{ r.outflow | eur }}"></div>
+              {% endif %}
+              <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#94a3b8"></div>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="alert alert-info small mt-4 mb-0">
+  <i class="bi bi-info-circle me-1"></i>
+  <strong>Note sulla previsione:</strong>
+  <ul class="mb-0 mt-1">
+    <li>Le entrate sono fatture <strong>aperte</strong> (pending/overdue) raggruppate per data scadenza.</li>
+    <li>Le uscite sono fatture passive <strong>aperte</strong> raggruppate per data scadenza.</li>
+    <li>Gli importi <strong>scaduti</strong> (passato) sono sommati al saldo iniziale (assumendo regolazione immediata).</li>
+    <li>Non sono considerati: salari, affitto, utenze, tasse — aggiungi questi come fatture passive ricorrenti se vuoi includerli.</li>
+  </ul>
+</div>
+{% endblock %}

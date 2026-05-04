@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block title %}Scadenze fiscali – GestFatture{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4 flex-wrap gap-2">
+  <div>
+    <h2><i class="bi bi-calendar2-event me-2"></i>Scadenze fiscali</h2>
+    <p class="text-muted small mb-0">
+      Calendario IVA, F24, INPS, INAIL, CCIAA, dichiarazioni — tutto in un posto.
+      Notifiche automatiche 7 giorni prima della scadenza.
+    </p>
+  </div>
+  <div class="d-flex gap-2 flex-wrap">
+    {% if items|length == 0 and status != 'completed' %}
+    <form method="post" action="{{ url_for('fiscal_seed_it') }}"
+          onsubmit="return confirm('Caricare le scadenze italiane standard per quest\\'anno?')">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="btn btn-outline-primary">
+        <i class="bi bi-download me-1"></i> Carica scadenze IT
+      </button>
+    </form>
+    {% endif %}
+    <a href="{{ url_for('new_fiscal_deadline') }}" class="btn btn-primary">
+      <i class="bi bi-plus-lg me-1"></i> Nuova scadenza
+    </a>
+  </div>
+</div>
+
+<!-- KPI -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold">{{ kpi.open }}</div>
+      <div class="small text-muted">Aperte</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100 border-start border-danger border-4">
+      <div class="fs-2 fw-bold text-danger">{{ kpi.overdue }}</div>
+      <div class="small text-muted">In ritardo</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100 border-start border-warning border-4">
+      <div class="fs-2 fw-bold text-warning">{{ kpi.this_week }}</div>
+      <div class="small text-muted">Entro 7 giorni</div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm text-center py-3 h-100">
+      <div class="fs-2 fw-bold text-primary">{{ kpi.this_month }}</div>
+      <div class="small text-muted">Entro 30 giorni</div>
+    </div>
+  </div>
+</div>
+
+<!-- Tabs status -->
+<ul class="nav nav-tabs mb-3">
+  <li class="nav-item">
+    <a class="nav-link {% if status == 'open' %}active{% endif %}"
+       href="{{ url_for('fiscal_deadlines', status='open') }}">Aperte ({{ kpi.open }})</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if status == 'completed' %}active{% endif %}"
+       href="{{ url_for('fiscal_deadlines', status='completed') }}">Completate</a>
+  </li>
+  <li class="nav-item">
+    <a class="nav-link {% if status == 'all' %}active{% endif %}"
+       href="{{ url_for('fiscal_deadlines', status='all') }}">Tutte</a>
+  </li>
+</ul>
+
+<div class="card border-0 shadow-sm">
+  <div class="card-body p-0">
+    {% if items %}
+    <table class="table table-hover align-middle mb-0">
+      <thead class="table-light">
+        <tr>
+          <th>Scadenza</th><th>Categoria</th><th>Titolo</th>
+          <th class="text-end">Importo</th><th>Stato</th><th></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for d in items %}
+      {% set sl = d.status_label %}
+      {% set cl = d.category_label %}
+      <tr {% if not d.completed and d.days_until < 0 %}class="table-danger"{% elif not d.completed and d.days_until <= 7 %}class="table-warning"{% endif %}>
+        <td>
+          <strong>{{ d.deadline.strftime('%d/%m/%Y') }}</strong>
+          <div class="small text-muted">{{ d.deadline.strftime('%A')|capitalize }}</div>
+        </td>
+        <td><span class="badge bg-{{ cl[1] }}-subtle text-{{ cl[1] }}-emphasis border">{{ cl[0] }}</span></td>
+        <td>
+          <strong>{{ d.title }}</strong>
+          {% if d.notes %}<div class="small text-muted">{{ d.notes[:120] }}{% if d.notes|length > 120 %}…{% endif %}</div>{% endif %}
+          {% if d.is_recurring %}<span class="badge bg-light text-muted border ms-1" style="font-size:.65rem">↻ {{ d.recurrence }}</span>{% endif %}
+        </td>
+        <td class="text-end">
+          {% if d.amount %}<strong>{{ d.amount | eur }}</strong>{% else %}<span class="text-muted">—</span>{% endif %}
+        </td>
+        <td><span class="badge bg-{{ sl[1] }}">{{ sl[0] }}</span></td>
+        <td class="text-end">
+          {% if not d.completed %}
+          <form method="post" action="{{ url_for('fiscal_complete', fid=d.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-success" title="Marca completata">
+              <i class="bi bi-check-lg"></i>
+            </button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('fiscal_delete', fid=d.id) }}" class="d-inline"
+                onsubmit="return confirm('Eliminare questa scadenza?')">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-sm btn-outline-danger" title="Elimina">
+              <i class="bi bi-trash"></i>
+            </button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="text-center text-muted p-5">
+      <i class="bi bi-calendar-check fs-1 d-block mb-2"></i>
+      <p>Nessuna scadenza {% if status == 'open' %}aperta{% elif status == 'completed' %}completata{% endif %}.</p>
+      {% if status != 'completed' %}
+      <p class="small">
+        <a href="{{ url_for('new_fiscal_deadline') }}">Aggiungine una</a> oppure usa
+        il bottone "Carica scadenze IT" sopra per il calendario fiscale italiano standard.
+      </p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

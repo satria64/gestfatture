@@ -184,6 +184,26 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 ### Bandi di finanziamento
 - [x] **Bandi MVP** — scraping AI da MIMIT/Invitalia (estensibile), matching AI personalizzato sul profilo utente (ATECO/regione/dimensione/descrizione), lista filtrabile per score, save/dismiss, sync giornaliero alle 06:00. Sezione "Mio profilo" estesa con campi per matching.
 
+### Quadro generale "salute aziendale" (`/health`)
+- [x] Vista executive con tutto integrato: alert critici, saldo netto previsto, KPI banche/incassi/pagamenti, prossimi pagamenti 7gg, prossimi incassi 7gg, scadenze fiscali 30gg, bandi rilevanti, ticket aperti, transazioni da riconciliare.
+- [x] Alert dinamici (saldo negativo, pagamenti in ritardo, scadenze fiscali in ritardo, ecc.) con bottoni di azione contestuale.
+
+### Cash flow forecast (`/cash-flow`)
+- [x] Proiezione settimanale per 12 settimane (~3 mesi) con saldo cumulativo per ogni settimana
+- [x] Saldo iniziale = somma `last_balance` delle banche collegate (sync automatico da Tink)
+- [x] Entrate previste: fatture attive aperte raggruppate per `due_date`
+- [x] Uscite previste: fatture passive aperte raggruppate per `due_date`
+- [x] Scaduti sommati al saldo iniziale (assumendo regolazione immediata)
+- [x] Alert "saldo previsto negativo" se min cumulativo < 0
+- [x] Mini grafico barre orizzontali (no librerie esterne, pure HTML/CSS)
+
+### Calendario scadenze fiscali (`/fiscal`)
+- [x] Modello `FiscalDeadline` con categorie italiane (IVA mensile/trimestrale, F24, INPS, INAIL, CCIAA, dichiarazione, 770, LIPE, intrastat, altro)
+- [x] CRUD: nuova scadenza, complete, delete; con flag `is_recurring` (monthly/quarterly/yearly) che rigenera la prossima istanza al completamento
+- [x] **Seed automatico scadenze IT standard**: bottone "Carica scadenze IT" che popola IVA mensile/trimestrale, INPS artigiani, INAIL, CCIAA, LIPE, acconti IRPEF, dichiarazione redditi, mod. 770 per l'anno corrente
+- [x] **Notifica automatica** giornaliera alle 08:30 (email + WhatsApp) per scadenze nei prossimi 7gg non ancora notificate
+- [x] KPI: aperte, in ritardo, entro 7gg, entro 30gg
+
 ### Lato passivo (fornitori + pagamenti da fare)
 - [x] **Anagrafica fornitori** in `/suppliers` (riusa modello Client con flag `is_supplier=True`, aggiunto campo `iban` per bonifici)
 - [x] **Fatture passive** in `/payables` (Invoice con flag `is_passive=True`, campo `payment_method` per metodo di pagamento)

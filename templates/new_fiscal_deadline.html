@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Nuova scadenza fiscale – GestFatture{% endblock %}
+
+{% block content %}
+<a href="{{ url_for('fiscal_deadlines') }}" class="text-muted small text-decoration-none">
+  <i class="bi bi-arrow-left me-1"></i> Torna alle scadenze
+</a>
+
+<h2 class="mt-2 mb-4"><i class="bi bi-calendar-plus me-2"></i>Nuova scadenza fiscale</h2>
+
+<form method="post" class="card border-0 shadow-sm" style="max-width:720px">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="card-body">
+    <div class="row g-3">
+      <div class="col-12">
+        <label class="form-label fw-semibold">Titolo *</label>
+        <input type="text" name="title" class="form-control" required maxlength="200"
+               placeholder="Es. IVA mensile dicembre 2026, F24 ritenute, Diritto annuale CCIAA…">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Data scadenza *</label>
+        <input type="date" name="deadline" class="form-control" required value="{{ today_iso }}">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Categoria</label>
+        <select name="category" class="form-select">
+          <option value="iva_mensile">📊 IVA mensile</option>
+          <option value="iva_trimestrale">📊 IVA trimestrale</option>
+          <option value="lipe">📊 LIPE (Liquidazione IVA periodica)</option>
+          <option value="f24">🏛 F24</option>
+          <option value="inps">👥 INPS</option>
+          <option value="inail">🛡 INAIL</option>
+          <option value="cciaa">🏢 CCIAA (diritto annuale)</option>
+          <option value="dichiarazione">📄 Dichiarazione redditi</option>
+          <option value="770">📄 Mod. 770</option>
+          <option value="intrastat">🌍 Intrastat</option>
+          <option value="altro" selected>📌 Altro</option>
+        </select>
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Importo da versare (€)</label>
+        <input type="text" name="amount" class="form-control" placeholder="0,00 (opzionale)">
+      </div>
+      <div class="col-md-6">
+        <label class="form-label fw-semibold">Ricorrenza</label>
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" name="is_recurring" id="rec"
+                 onchange="document.getElementById('recBlock').style.display = this.checked ? 'block' : 'none'">
+          <label class="form-check-label" for="rec">Scadenza ricorrente</label>
+        </div>
+        <div id="recBlock" style="display:none" class="mt-2">
+          <select name="recurrence" class="form-select form-select-sm">
+            <option value="monthly">Mensile</option>
+            <option value="quarterly">Trimestrale</option>
+            <option value="yearly" selected>Annuale</option>
+          </select>
+          <div class="form-text small">
+            Quando completi una scadenza ricorrente, la prossima viene generata
+            automaticamente.
+          </div>
+        </div>
+      </div>
+      <div class="col-12">
+        <label class="form-label fw-semibold">Note (opzionale)</label>
+        <textarea name="notes" class="form-control" rows="3"
+                  placeholder="Es. Calcolo IVA: 22% su €X imponibile = €Y da versare. Codice tributo 6099…"></textarea>
+      </div>
+    </div>
+
+    <div class="mt-4 d-flex gap-2">
+      <button class="btn btn-primary">
+        <i class="bi bi-save me-1"></i> Aggiungi scadenza
+      </button>
+      <a href="{{ url_for('fiscal_deadlines') }}" class="btn btn-outline-secondary">Annulla</a>
+    </div>
+  </div>
+</form>
+{% endblock %}
