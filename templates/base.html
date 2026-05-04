@@ -83,8 +83,15 @@
       </li>
       <li>
         <a href="{{ url_for('bank_overview') }}"
-           class="nav-link text-white {% if 'bank' in (request.endpoint or '') %}active{% endif %}">
+           class="nav-link text-white {% if request.endpoint in ['bank_overview','bank_connect','bank_callback','bank_sync_now','bank_disconnect'] %}active{% endif %}">
           <i class="bi bi-bank me-2"></i> Banche
+        </a>
+      </li>
+      <li>
+        <a href="{{ url_for('bank_reconciliation') }}"
+           class="nav-link text-white {% if request.endpoint in ['bank_reconciliation','bank_match_manual','bank_ignore_tx'] %}active{% endif %}"
+           style="padding-left:2.2rem;font-size:.88rem;opacity:.85">
+          <i class="bi bi-list-check me-2"></i> Riconciliazione
         </a>
       </li>
       <li>
