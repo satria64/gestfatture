@@ -31,11 +31,24 @@
     <div class="card border-0 shadow-sm h-100">
       <div class="card-body">
         <div class="d-flex justify-content-between align-items-start mb-2">
-          <div>
-            <h5 class="mb-1">{{ a.institution_name or a.institution_id }}</h5>
-            <small class="text-muted">{{ a.iban or '—' }}</small>
+          <div style="min-width:0">
+            <h5 class="mb-1 text-truncate">
+              {% if a.name and not a.name.startswith(a.external_account_id[:10]) %}
+                {{ a.name }}
+              {% elif a.iban %}
+                Conto {{ a.iban[:4] }}…{{ a.iban[-4:] }}
+              {% else %}
+                Conto bancario
+              {% endif %}
+            </h5>
+            {% if a.iban %}
+              <code class="small text-muted">{{ a.iban }}</code>
+            {% endif %}
+            {% if a.institution_name and a.institution_name != a.institution_id %}
+              <div class="small text-muted">{{ a.institution_name }}</div>
+            {% endif %}
           </div>
-          <span class="badge bg-{{ sl[1] }}">{{ sl[0] }}</span>
+          <span class="badge bg-{{ sl[1] }} flex-shrink-0">{{ sl[0] }}</span>
         </div>
         <dl class="row mb-3 small">
           {% if a.owner_name %}
