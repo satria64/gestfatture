@@ -305,10 +305,10 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ## 🚦 Setup Stripe (post-deploy)
 
-Per abilitare il signup pubblico con abbonamenti €15/mese:
+Per abilitare il signup pubblico con abbonamenti €9,99/mese:
 
 1. **Crea il prodotto su Stripe**
-   Dashboard → Products → "GestFatture Pro", prezzo ricorrente €15/mese, copia il `price_id`
+   Dashboard → Products → "GestFatture Pro", prezzo ricorrente €9,99/mese, copia il `price_id`
 
 2. **Configura il Customer Portal**
    Dashboard → Settings → Billing → Customer portal → abilita

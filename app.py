@@ -3714,7 +3714,7 @@ def _seed_settings():
         # ─── Sottoscrizione SaaS (signup pubblico → Stripe Checkout) ─────
         "stripe_secret_key":      "",   # sk_live_... per gestire subscription
         "stripe_publishable_key": "",   # pk_live_... (mostrabile lato client)
-        "stripe_price_id":        "",   # price_... del piano €15/mese
+        "stripe_price_id":        "",   # price_... del piano €9,99/mese (IVA inclusa)
         "signup_enabled":         "true",  # toggle per disabilitare signup pubblici
     }
     for k, v in defaults.items():

@@ -210,7 +210,7 @@
     </div>
     <div class="card-body">
       <p class="small text-muted mb-3">
-        Configura Stripe per gli abbonamenti del piano <strong>GestFatture Pro €15/mese</strong>.
+        Configura Stripe per gli abbonamenti del piano <strong>GestFatture Pro €9,99/mese</strong>.
         I nuovi utenti registrati su <code>/register</code> verranno reindirizzati a Stripe Checkout
         con 30 giorni di prova gratuita.
       </p>
@@ -239,13 +239,13 @@
 
       <div class="row g-3 mt-1">
         <div class="col-md-8">
-          <label class="form-label fw-semibold">Stripe Price ID (piano €15/mese)</label>
+          <label class="form-label fw-semibold">Stripe Price ID (piano €9,99/mese)</label>
           <input type="text" name="stripe_price_id" class="form-control"
                  value="{{ settings.stripe_price_id }}"
                  placeholder="price_...">
           <div class="form-text">
             Crea il prodotto su <a href="https://dashboard.stripe.com/products" target="_blank">
-              dashboard.stripe.com → Prodotti</a> con prezzo <strong>ricorrente €15/mese</strong>
+              dashboard.stripe.com → Prodotti</a> con prezzo <strong>ricorrente €9,99/mese</strong>
             e copia qui il <code>price_id</code>.
           </div>
         </div>
@@ -268,7 +268,7 @@
       <div class="alert alert-info small mt-3 mb-0">
         <strong>Setup Stripe — checklist:</strong>
         <ol class="mb-0 mt-2">
-          <li>Crea il prodotto "GestFatture Pro" con prezzo ricorrente €15/mese</li>
+          <li>Crea il prodotto "GestFatture Pro" con prezzo ricorrente €9,99/mese</li>
           <li>Configura il Customer Portal: Stripe Dashboard → Settings → Billing → Customer portal (abilita "Cancellazione subscription" e "Aggiornamento metodi di pagamento")</li>
           <li>Webhook endpoint:
             <code>{{ settings.app_external_url or 'https://app.gestfatture.com' }}/webhook/stripe</code>
