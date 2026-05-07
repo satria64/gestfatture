@@ -62,6 +62,250 @@
   </div>
 </div>
 
+<!-- ─── Alert e segnalazioni multi-cliente ─── -->
+{% if total_alerts > 0 %}
+<div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
+  <div class="card-header bg-warning-subtle fw-semibold d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-bell-fill me-1"></i> Alert e segnalazioni</span>
+    <span class="badge bg-warning text-dark">{{ total_alerts }} elementi da rivedere</span>
+  </div>
+  <div class="card-body p-0">
+    <div class="accordion accordion-flush" id="alertsAccordion">
+
+      {% if alerts.pec_urgent %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertPec">
+            <i class="bi bi-envelope-paper-fill me-2 text-danger"></i>
+            <strong>{{ alerts.pec_urgent|length }} PEC istituzionali</strong>
+            &nbsp;urgenti non lette (AdE / INPS / INAIL)
+          </button>
+        </h2>
+        <div id="alertPec" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body p-0">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light">
+                <tr><th>Cliente</th><th>Mittente</th><th>Oggetto</th><th>Urgenza</th><th>Ricevuta</th><th></th></tr>
+              </thead>
+              <tbody>
+                {% for p in alerts.pec_urgent %}
+                <tr>
+                  <td><strong>{{ p.company }}</strong></td>
+                  <td><span class="badge bg-secondary-subtle text-dark">{{ p.sender }}</span></td>
+                  <td class="small text-truncate" style="max-width:250px">{{ p.subject }}</td>
+                  <td>
+                    {% if p.urgency == 'alta' %}
+                      <span class="badge bg-danger">Alta</span>
+                    {% else %}
+                      <span class="badge bg-warning text-dark">Media</span>
+                    {% endif %}
+                  </td>
+                  <td class="small text-muted">{{ p.received.strftime('%d/%m %H:%M') if p.received else '—' }}</td>
+                  <td>
+                    <form method="post" action="{{ url_for('accountant_switch', client_user_id=p.client_user_id) }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-outline-primary py-0 px-2" type="submit" title="Entra come questo cliente">
+                        <i class="bi bi-box-arrow-in-right"></i>
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if alerts.fiscal_overdue %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertFiscal">
+            <i class="bi bi-calendar-x-fill me-2 text-danger"></i>
+            <strong>{{ alerts.fiscal_overdue|length }} clienti</strong>
+            &nbsp;con scadenze fiscali <span class="text-danger">in ritardo</span>
+          </button>
+        </h2>
+        <div id="alertFiscal" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body">
+            {% for f in alerts.fiscal_overdue %}
+            <div class="d-flex justify-content-between align-items-start py-2 border-bottom">
+              <div>
+                <strong>{{ f.company }}</strong>
+                <span class="badge bg-danger ms-2">{{ f.count }} scaduta/e</span>
+                <ul class="small mb-0 mt-1 text-muted">
+                  {% for d in f.items %}
+                  <li>
+                    {% set lbl, color = d.category_label %}{{ lbl }} ·
+                    <em>{{ d.title }}</em> · scaduta il {{ d.deadline.strftime('%d/%m/%Y') }}
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+              <form method="post" action="{{ url_for('accountant_switch', client_user_id=f.client_user_id) }}" class="m-0">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit">
+                  <i class="bi bi-box-arrow-in-right me-1"></i> Entra come
+                </button>
+              </form>
+            </div>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if alerts.cashflow_negative %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertCashflow">
+            <i class="bi bi-graph-down-arrow me-2 text-danger"></i>
+            <strong>{{ alerts.cashflow_negative|length }} clienti</strong>
+            &nbsp;con saldo previsto <span class="text-danger">negativo</span>
+          </button>
+        </h2>
+        <div id="alertCashflow" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body p-0">
+            <table class="table table-sm table-hover mb-0">
+              <thead class="table-light">
+                <tr>
+                  <th>Cliente</th><th class="text-end">Saldo banca</th>
+                  <th class="text-end">Scaduto da incassare</th>
+                  <th class="text-end">Scaduto da pagare</th>
+                  <th class="text-end">Saldo previsto</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for c in alerts.cashflow_negative %}
+                <tr>
+                  <td><strong>{{ c.company }}</strong></td>
+                  <td class="text-end">{{ c.saldo|eur }}</td>
+                  <td class="text-end text-success">+{{ c.scaduto_attivo|eur }}</td>
+                  <td class="text-end text-danger">−{{ c.scaduto_passivo|eur }}</td>
+                  <td class="text-end fw-bold text-danger">{{ c.saldo_previsto|eur }}</td>
+                  <td>
+                    <form method="post" action="{{ url_for('accountant_switch', client_user_id=c.client_user_id) }}" class="d-inline">
+                      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                      <button class="btn btn-sm btn-outline-primary py-0 px-2" type="submit"><i class="bi bi-box-arrow-in-right"></i></button>
+                    </form>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if alerts.bank_pending %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertBank">
+            <i class="bi bi-bank2 me-2 text-info"></i>
+            <strong>{{ alerts.bank_pending|length }} clienti</strong>
+            &nbsp;con transazioni bancarie da riconciliare
+          </button>
+        </h2>
+        <div id="alertBank" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body">
+            <ul class="list-unstyled mb-0">
+              {% for c in alerts.bank_pending %}
+              <li class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                <div>
+                  <strong>{{ c.company }}</strong>
+                  <span class="badge bg-info-subtle text-info-emphasis ms-2">{{ c.count }} transazioni · {{ c.amount|eur }}</span>
+                </div>
+                <form method="post" action="{{ url_for('accountant_switch', client_user_id=c.client_user_id) }}" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-box-arrow-in-right me-1"></i> Riconcilia</button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if alerts.tickets_open %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertTickets">
+            <i class="bi bi-life-preserver me-2 text-primary"></i>
+            <strong>{{ alerts.tickets_open|length }} clienti</strong>
+            &nbsp;con ticket di assistenza aperti
+          </button>
+        </h2>
+        <div id="alertTickets" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body">
+            <ul class="list-unstyled mb-0">
+              {% for c in alerts.tickets_open %}
+              <li class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                <div>
+                  <strong>{{ c.company }}</strong>
+                  <span class="badge bg-primary-subtle text-primary-emphasis ms-2">{{ c.count }} ticket aperti</span>
+                </div>
+                <form method="post" action="{{ url_for('accountant_switch', client_user_id=c.client_user_id) }}" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-box-arrow-in-right me-1"></i> Vedi ticket</button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+      {% if alerts.bandi_relevant %}
+      <div class="accordion-item">
+        <h2 class="accordion-header">
+          <button class="accordion-button collapsed" type="button"
+                  data-bs-toggle="collapse" data-bs-target="#alertBandi">
+            <i class="bi bi-cash-coin me-2 text-success"></i>
+            <strong>{{ alerts.bandi_relevant|length }} clienti</strong>
+            &nbsp;con bandi rilevanti aperti (match ≥75%)
+          </button>
+        </h2>
+        <div id="alertBandi" class="accordion-collapse collapse" data-bs-parent="#alertsAccordion">
+          <div class="accordion-body">
+            <ul class="list-unstyled mb-0">
+              {% for c in alerts.bandi_relevant %}
+              <li class="d-flex justify-content-between align-items-center py-2 border-bottom">
+                <div>
+                  <strong>{{ c.company }}</strong>
+                  <span class="badge bg-success-subtle text-success-emphasis ms-2">{{ c.count }} bandi compatibili</span>
+                </div>
+                <form method="post" action="{{ url_for('accountant_switch', client_user_id=c.client_user_id) }}" class="m-0">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                  <button class="btn btn-sm btn-outline-primary" type="submit"><i class="bi bi-box-arrow-in-right me-1"></i> Vedi bandi</button>
+                </form>
+              </li>
+              {% endfor %}
+            </ul>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+</div>
+{% else %}
+<div class="alert alert-success d-flex align-items-center mb-4">
+  <i class="bi bi-check-circle-fill me-2"></i>
+  <div>Nessun alert al momento. Tutti i tuoi clienti sono in ordine 👍</div>
+</div>
+{% endif %}
+
 <!-- ─── Lista clienti ─── -->
 <div class="card border-0 shadow-sm mb-4">
   <div class="card-header bg-white fw-semibold">

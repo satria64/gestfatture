@@ -501,22 +501,32 @@ def create_app():
     @app.route("/accountant/dashboard")
     @accountant_required
     def accountant_dashboard():
-        """Panoramica del commercialista: lista clienti gestiti + KPI aggregate."""
+        """Panoramica del commercialista: lista clienti gestiti + KPI aggregate + alert."""
+        from sqlalchemy import func
+        from datetime import timedelta
+
         # Clienti gestiti (relazioni attive + accettate)
         rels = (AccountantClient.query
                 .filter_by(accountant_id=current_user.id, is_active=True)
                 .order_by(AccountantClient.created_at.desc()).all())
         accepted = [r for r in rels if r.accepted_at]
         pending  = [r for r in rels if not r.accepted_at]
-
-        # KPI aggregate sui clienti accettati
         client_ids = [r.client_user_id for r in accepted]
+
+        # Cache nomi azienda per ogni client_user_id
+        company_by_uid = {}
+        user_by_uid = {}
+        for r in accepted:
+            cu = r.client_user
+            user_by_uid[cu.id] = cu
+            company_by_uid[cu.id] = UserSetting.get(cu.id, "company_name") or cu.username
+
+        # ─── KPI aggregate ──────────────────────────────────────────────
         total_open_invoices = 0
         total_overdue_amount = 0.0
         total_open_amount = 0.0
         critical_alerts = 0
         if client_ids:
-            from sqlalchemy import func
             total_open_invoices = (Invoice.query
                 .filter(Invoice.user_id.in_(client_ids))
                 .filter(Invoice.status.in_(["pending", "overdue"]))
@@ -532,8 +542,6 @@ def create_app():
                 .filter(Invoice.status.in_(["pending", "overdue"]))
                 .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
                 .scalar() or 0.0)
-            # Scadenze fiscali non completate dei prossimi 30gg
-            from datetime import timedelta
             cutoff = date.today() + timedelta(days=30)
             critical_alerts = (FiscalDeadline.query
                 .filter(FiscalDeadline.user_id.in_(client_ids))
@@ -541,7 +549,124 @@ def create_app():
                 .filter(FiscalDeadline.deadline <= cutoff)
                 .count())
 
-        # Per ogni cliente, prepara summary singolo per la lista
+        # ─── Alert e segnalazioni multi-cliente (Fase 1.5) ──────────────
+        alerts = {
+            "pec_urgent": [], "bank_pending": [], "bandi_relevant": [],
+            "tickets_open": [], "cashflow_negative": [], "fiscal_overdue": [],
+        }
+        if client_ids:
+            # 1. PEC istituzionali urgenti non lette
+            pec_rows = (PecMessage.query
+                .filter(PecMessage.user_id.in_(client_ids))
+                .filter(PecMessage.is_read.is_(False))
+                .filter(PecMessage.is_archived.is_(False))
+                .filter(PecMessage.urgency.in_(["alta", "media"]))
+                .order_by(PecMessage.urgency.desc(), PecMessage.received_at.desc())
+                .limit(20).all())
+            for p in pec_rows:
+                alerts["pec_urgent"].append({
+                    "client_user_id": p.user_id,
+                    "company": company_by_uid.get(p.user_id, "?"),
+                    "sender": p.sender_label or "PEC",
+                    "subject": (p.subject or "")[:80],
+                    "urgency": p.urgency or "media",
+                    "received": p.received_at,
+                })
+
+            # 2. Transazioni bancarie da riconciliare (entrate pending)
+            bank_pending_rows = (db.session.query(
+                    BankTransaction.user_id,
+                    func.count(BankTransaction.id).label("count"),
+                    func.coalesce(func.sum(BankTransaction.amount), 0.0).label("amount"))
+                .filter(BankTransaction.user_id.in_(client_ids))
+                .filter(BankTransaction.status == "pending")
+                .filter(BankTransaction.amount > 0)
+                .group_by(BankTransaction.user_id).all())
+            for uid, cnt, amt in bank_pending_rows:
+                alerts["bank_pending"].append({
+                    "client_user_id": uid,
+                    "company": company_by_uid.get(uid, "?"),
+                    "count": cnt, "amount": amt,
+                })
+
+            # 3. Bandi rilevanti aperti (relevance >= 75, non dismissed, deadline futura)
+            bandi_rows = (db.session.query(
+                    BandoMatch.user_id,
+                    func.count(BandoMatch.id).label("count"))
+                .join(Bando, Bando.id == BandoMatch.bando_id)
+                .filter(BandoMatch.user_id.in_(client_ids))
+                .filter(BandoMatch.is_dismissed.is_(False))
+                .filter(BandoMatch.relevance_score >= 75)
+                .filter(db.or_(Bando.deadline.is_(None), Bando.deadline >= date.today()))
+                .filter(Bando.is_active.is_(True))
+                .group_by(BandoMatch.user_id).all())
+            for uid, cnt in bandi_rows:
+                alerts["bandi_relevant"].append({
+                    "client_user_id": uid,
+                    "company": company_by_uid.get(uid, "?"),
+                    "count": cnt,
+                })
+
+            # 4. Ticket assistenza aperti (open / in_progress / waiting_user)
+            tickets_rows = (db.session.query(
+                    SupportTicket.user_id,
+                    func.count(SupportTicket.id).label("count"))
+                .filter(SupportTicket.user_id.in_(client_ids))
+                .filter(SupportTicket.status.in_(["open", "in_progress", "waiting_user"]))
+                .group_by(SupportTicket.user_id).all())
+            for uid, cnt in tickets_rows:
+                alerts["tickets_open"].append({
+                    "client_user_id": uid,
+                    "company": company_by_uid.get(uid, "?"),
+                    "count": cnt,
+                })
+
+            # 5. Alert cash flow negativo: saldo banche < scaduto attivo
+            for uid in client_ids:
+                saldo = (db.session.query(func.coalesce(func.sum(BankAccount.last_balance), 0.0))
+                    .filter(BankAccount.user_id == uid)
+                    .filter(BankAccount.status == "linked")
+                    .scalar() or 0.0)
+                # Scaduto attivo (entrate non ancora arrivate)
+                scaduto_attivo = (db.session.query(func.coalesce(func.sum(Invoice.amount), 0.0))
+                    .filter(Invoice.user_id == uid, Invoice.status == "overdue")
+                    .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                    .scalar() or 0.0)
+                # Da pagare scaduto (uscite scadute)
+                scaduto_passivo = (db.session.query(func.coalesce(func.sum(Invoice.amount), 0.0))
+                    .filter(Invoice.user_id == uid, Invoice.status == "overdue",
+                            Invoice.is_passive.is_(True))
+                    .scalar() or 0.0)
+                # Saldo previsto = saldo attuale + entrate scadute - uscite scadute
+                # Se < 0, c'è un problema
+                saldo_previsto = saldo + scaduto_attivo - scaduto_passivo
+                # Mostra solo se ha banche collegate (saldo != 0) o se ha movimenti aperti significativi
+                if (saldo or scaduto_attivo or scaduto_passivo) and saldo_previsto < 0:
+                    alerts["cashflow_negative"].append({
+                        "client_user_id": uid,
+                        "company": company_by_uid.get(uid, "?"),
+                        "saldo": saldo, "scaduto_attivo": scaduto_attivo,
+                        "scaduto_passivo": scaduto_passivo,
+                        "saldo_previsto": saldo_previsto,
+                    })
+
+            # 6. Scadenze fiscali in ritardo (deadline < oggi, non completate)
+            fiscal_rows = (FiscalDeadline.query
+                .filter(FiscalDeadline.user_id.in_(client_ids))
+                .filter(FiscalDeadline.completed.is_(False))
+                .filter(FiscalDeadline.deadline < date.today())
+                .order_by(FiscalDeadline.deadline).limit(30).all())
+            grouped_fiscal = {}
+            for d in fiscal_rows:
+                grouped_fiscal.setdefault(d.user_id, []).append(d)
+            for uid, items in grouped_fiscal.items():
+                alerts["fiscal_overdue"].append({
+                    "client_user_id": uid,
+                    "company": company_by_uid.get(uid, "?"),
+                    "items": items[:5], "count": len(items),
+                })
+
+        # ─── Per ogni cliente, summary singolo per la lista ─────────────
         clients_summary = []
         for rel in accepted:
             cu = rel.client_user
@@ -554,11 +679,18 @@ def create_app():
                 .filter_by(user_id=cu.id, status="overdue")
                 .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
                 .count())
-            company = UserSetting.get(cu.id, "company_name") or cu.username
             clients_summary.append({
-                "rel": rel, "user": cu, "company": company,
+                "rel": rel, "user": cu, "company": company_by_uid.get(cu.id, cu.username),
                 "inv_open": inv_open, "inv_overdue": inv_overdue,
             })
+
+        # Totale alert per badge in alto
+        total_alerts = (len(alerts["pec_urgent"])
+                        + len(alerts["bank_pending"])
+                        + len(alerts["bandi_relevant"])
+                        + len(alerts["tickets_open"])
+                        + len(alerts["cashflow_negative"])
+                        + len(alerts["fiscal_overdue"]))
 
         return render_template("accountant_dashboard.html",
                                accepted_count=len(accepted),
@@ -568,7 +700,9 @@ def create_app():
                                total_open_invoices=total_open_invoices,
                                total_open_amount=total_open_amount,
                                total_overdue_amount=total_overdue_amount,
-                               critical_alerts=critical_alerts)
+                               critical_alerts=critical_alerts,
+                               alerts=alerts,
+                               total_alerts=total_alerts)
 
     @app.route("/accountant/clients/invite", methods=["GET", "POST"])
     @accountant_required
