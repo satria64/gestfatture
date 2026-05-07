@@ -476,14 +476,211 @@ def create_app():
         return redirect(url_for("dashboard"))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # FATTURAZIONE ATTIVA — placeholder (Fase 2 in arrivo)
+    # FATTURAZIONE ATTIVA: emissione FatturaPA + download XML (Fase 2 MVP)
     # ═══════════════════════════════════════════════════════════════════════════
-    @app.route("/invoices/new")
+    def _next_progressivo(user_id: int, year: int) -> int:
+        """Restituisce il prossimo progressivo per l'utente nell'anno specificato.
+        Conta le fatture is_outgoing con progressivo già assegnato per l'anno."""
+        from sqlalchemy import func, extract
+        max_p = (db.session.query(func.max(Invoice.progressivo))
+                 .filter(Invoice.user_id == user_id)
+                 .filter(Invoice.is_outgoing.is_(True))
+                 .filter(extract("year", Invoice.issue_date) == year)
+                 .scalar())
+        return (max_p or 0) + 1
+
+    def _build_outgoing_xml(invoice):
+        """Genera l'XML FatturaPA per una fattura emessa, lo salva su disco
+        e aggiorna invoice.xml_filename. Restituisce il path completo."""
+        from fatturapa_generator import (Fattura, Cedente, Cessionario, Riga,
+                                          generate_xml, make_filename, encode_progressivo)
+        from datetime import datetime as _dt
+        # Dati cedente (utente che emette)
+        uid = invoice.user_id
+        ced = Cedente(
+            piva=UserSetting.get(uid, "my_vat_number") or "",
+            codice_fiscale=UserSetting.get(uid, "cedente_codice_fiscale") or
+                           (UserSetting.get(uid, "my_vat_number") or ""),
+            denominazione=UserSetting.get(uid, "company_name") or "",
+            nome=UserSetting.get(uid, "cedente_nome") or "",
+            cognome=UserSetting.get(uid, "cedente_cognome") or "",
+            is_persona_fisica=UserSetting.get(uid, "cedente_persona_fisica") == "true",
+            indirizzo=UserSetting.get(uid, "cedente_address") or "",
+            cap=UserSetting.get(uid, "cedente_cap") or "",
+            comune=UserSetting.get(uid, "cedente_city") or "",
+            provincia=(UserSetting.get(uid, "cedente_provincia") or "").upper(),
+            nazione="IT",
+            regime_fiscale=UserSetting.get(uid, "cedente_regime_fiscale") or "RF01",
+        )
+        # Dati cessionario (cliente)
+        c = invoice.client
+        ces = Cessionario(
+            piva="".join(ch for ch in (c.vat_number or "") if ch.isdigit())[:11],
+            codice_fiscale=(c.codice_fiscale or "").upper(),
+            denominazione=c.name,
+            indirizzo=c.address or "",
+            cap=c.cap or "",
+            comune=c.city or "",
+            provincia=(c.provincia or "").upper(),
+            nazione=c.nazione or "IT",
+            codice_destinatario=(c.codice_destinatario or "0000000").upper().zfill(7),
+            pec_destinatario=c.pec or "",
+        )
+        # Riga unica (MVP): usa amount come imponibile
+        imponibile = invoice.imponibile if invoice.imponibile else invoice.amount
+        riga = Riga(
+            descrizione=(invoice.notes[:200] if invoice.notes else "Prestazione di servizi"),
+            quantita=1.0,
+            prezzo_unitario=imponibile,
+            aliquota_iva=invoice.iva_rate or 22.0,
+        )
+        prog_int = invoice.progressivo or 1
+        f = Fattura(
+            numero=invoice.number,
+            data=invoice.issue_date,
+            cedente=ced, cessionario=ces, righe=[riga],
+            tipo_documento=invoice.document_type or "TD01",
+            progressivo_invio=encode_progressivo(prog_int),
+            data_scadenza=invoice.due_date,
+            modalita_pagamento="MP05",
+        )
+        xml_str = generate_xml(f)
+        filename = make_filename(ced.piva, encode_progressivo(prog_int))
+        # Salva su disco nella cartella uploads
+        path = os.path.join(get_upload_folder(), filename)
+        with open(path, "w", encoding="utf-8") as fp:
+            fp.write(xml_str)
+        invoice.xml_filename = filename
+        invoice.sdi_status = "draft"  # generata, non ancora inviata
+        db.session.commit()
+        return path
+
+    @app.route("/invoices/emit", methods=["GET", "POST"])
     @login_required
     def new_outgoing_invoice():
-        """Form emissione nuova fattura FatturaPA (placeholder Fase 2)."""
-        flash("⚙️ Modulo emissione FatturaPA in sviluppo (disponibile prossimamente).", "info")
-        return redirect(url_for("invoices"))
+        """Form emissione nuova fattura FatturaPA (Fase 2 MVP — salva + genera XML).
+        Path /invoices/emit per non collidere con /invoices/new (inserimento manuale)."""
+        # Pre-controllo dati cedente
+        uid = current_user.id
+        cedente_required = ["my_vat_number", "cedente_address", "cedente_city",
+                            "cedente_cap", "cedente_provincia"]
+        missing = [k for k in cedente_required if not UserSetting.get(uid, k)]
+        if missing and request.method == "GET":
+            flash("⚠️ Compila prima i 'Dati fiscali per emissione FatturaPA' nelle Impostazioni.",
+                  "warning")
+            return redirect(url_for("settings"))
+
+        clients_list = my_clients().order_by(Client.name).all()
+        if not clients_list and request.method == "GET":
+            flash("Aggiungi prima almeno un cliente con dati FatturaPA completi.", "warning")
+            return redirect(url_for("new_client"))
+
+        if request.method == "POST":
+            try:
+                client_id = int(request.form.get("client_id", "0"))
+                imponibile = float(request.form.get("imponibile", "0").replace(",", "."))
+                iva_rate = float(request.form.get("iva_rate", "22").replace(",", "."))
+                description = request.form.get("description", "").strip() or "Prestazione di servizi"
+                issue_date = datetime.strptime(request.form.get("issue_date", ""), "%Y-%m-%d").date()
+                due_date = datetime.strptime(request.form.get("due_date", ""), "%Y-%m-%d").date()
+            except Exception as e:
+                flash(f"❌ Dati non validi: {e}", "danger")
+                return redirect(url_for("new_outgoing_invoice"))
+
+            client = Client.query.filter_by(id=client_id, user_id=uid).first()
+            if not client:
+                flash("Cliente non trovato.", "danger")
+                return redirect(url_for("new_outgoing_invoice"))
+
+            # Validazione cliente FatturaPA
+            client_missing = []
+            if not client.address:    client_missing.append("indirizzo")
+            if not client.city:       client_missing.append("comune")
+            if not client.cap:        client_missing.append("CAP")
+            if not client.provincia:  client_missing.append("provincia")
+            cd = (client.codice_destinatario or "").strip()
+            if len(cd) != 7 and not client.pec:
+                client_missing.append("codice destinatario o PEC")
+            if client_missing:
+                flash(f"⚠️ Cliente {client.name}: completa prima questi campi: {', '.join(client_missing)}.",
+                      "warning")
+                return redirect(url_for("edit_client", cid=client.id))
+
+            # Calcolo IVA + totale
+            iva_amount = round(imponibile * iva_rate / 100.0, 2)
+            totale = round(imponibile + iva_amount, 2)
+
+            # Numerazione progressiva per anno
+            year = issue_date.year
+            prog = _next_progressivo(uid, year)
+            invoice_number = f"{prog}/{year}"
+
+            inv = Invoice(
+                user_id=uid, client_id=client.id,
+                number=invoice_number, amount=totale,
+                imponibile=imponibile, iva_rate=iva_rate, iva_amount=iva_amount,
+                issue_date=issue_date, due_date=due_date,
+                document_type="TD01", status="pending",
+                is_outgoing=True, is_passive=False,
+                progressivo=prog,
+                notes=description,
+                sdi_status="draft",
+            )
+            db.session.add(inv); db.session.commit()
+
+            try:
+                _build_outgoing_xml(inv)
+                audit("invoice_emitted",
+                      target=f"invoice:{inv.number}",
+                      details=f"client:{client.name[:60]} amount:{totale:.2f}EUR")
+                flash(f"✅ Fattura {invoice_number} creata. XML pronto per il download.", "success")
+            except ValueError as e:
+                flash(f"⚠️ Fattura creata ma XML non generato: {e}", "warning")
+            except Exception as e:
+                logging.exception("Errore generazione XML")
+                flash(f"⚠️ Fattura creata ma errore XML: {e}", "warning")
+
+            return redirect(url_for("invoice_detail", iid=inv.id))
+
+        # GET: form
+        next_prog = _next_progressivo(uid, date.today().year)
+        return render_template("new_outgoing_invoice.html",
+                               clients=clients_list,
+                               next_number=f"{next_prog}/{date.today().year}",
+                               today=date.today())
+
+    @app.route("/invoices/<int:iid>/xml")
+    @login_required
+    def download_invoice_xml(iid):
+        """Download XML FatturaPA della fattura emessa."""
+        inv = get_my_invoice(iid)
+        if not inv.is_outgoing or not inv.xml_filename:
+            abort(404)
+        return send_from_directory(
+            get_upload_folder(),
+            inv.xml_filename,
+            as_attachment=True,
+            mimetype="application/xml",
+        )
+
+    @app.route("/invoices/<int:iid>/regenerate-xml", methods=["POST"])
+    @login_required
+    @limiter.limit("20 per hour")
+    def regenerate_invoice_xml(iid):
+        """Rigenera l'XML (utile se hai modificato i dati cedente o cliente).
+        Disabilitato se la fattura è già stata inviata al SDI."""
+        inv = get_my_invoice(iid)
+        if not inv.is_outgoing:
+            abort(404)
+        if inv.sdi_status in ("sent", "delivered"):
+            flash("Non puoi rigenerare l'XML: fattura già inviata al SDI.", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        try:
+            _build_outgoing_xml(inv)
+            flash("✅ XML rigenerato.", "success")
+        except Exception as e:
+            flash(f"❌ Errore rigenerazione: {e}", "danger")
+        return redirect(url_for("invoice_detail", iid=iid))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # DASHBOARD COMMERCIALISTI (Fase 1)
@@ -2168,11 +2365,21 @@ def create_app():
     @login_required
     def new_client():
         if request.method == "POST":
+            cd = (request.form.get("codice_destinatario", "") or "").strip().upper()
             c = Client(
                 user_id=current_user.id,
                 name=request.form["name"], email=request.form.get("email",""),
                 pec=request.form.get("pec",""), phone=request.form.get("phone",""),
-                address=request.form.get("address",""), vat_number=request.form.get("vat_number",""),
+                address=request.form.get("address",""),
+                vat_number=request.form.get("vat_number",""),
+                # Campi FatturaPA (per emissione)
+                codice_destinatario=cd if len(cd) == 7 else "",
+                codice_fiscale=request.form.get("codice_fiscale", "").strip().upper(),
+                city=request.form.get("city", "").strip(),
+                cap=request.form.get("cap", "").strip(),
+                provincia=request.form.get("provincia", "").strip().upper()[:2],
+                nazione=request.form.get("nazione", "IT").strip().upper()[:2] or "IT",
+                regime_fiscale=request.form.get("regime_fiscale", "RF01").strip() or "RF01",
             )
             db.session.add(c); db.session.commit()
             flash("Cliente aggiunto.", "success")
@@ -2196,6 +2403,15 @@ def create_app():
             c.name=request.form["name"]; c.email=request.form.get("email","")
             c.pec=request.form.get("pec",""); c.phone=request.form.get("phone","")
             c.address=request.form.get("address",""); c.vat_number=request.form.get("vat_number","")
+            # Campi FatturaPA
+            cd = (request.form.get("codice_destinatario", "") or "").strip().upper()
+            c.codice_destinatario = cd if len(cd) == 7 else ""
+            c.codice_fiscale = request.form.get("codice_fiscale", "").strip().upper()
+            c.city           = request.form.get("city", "").strip()
+            c.cap            = request.form.get("cap", "").strip()
+            c.provincia      = request.form.get("provincia", "").strip().upper()[:2]
+            c.nazione        = request.form.get("nazione", "IT").strip().upper()[:2] or "IT"
+            c.regime_fiscale = request.form.get("regime_fiscale", "RF01").strip() or "RF01"
             db.session.commit(); flash("Cliente aggiornato.", "success")
             return redirect(url_for("client_detail", cid=c.id))
         return render_template("new_client.html", client=c)
@@ -3396,7 +3612,15 @@ def create_app():
     @login_required
     def settings():
         # Chiavi PERSONALI dell'utente (UserSetting)
-        user_keys = ["company_name", "payment_base_url"]
+        user_keys = [
+            "company_name", "payment_base_url",
+            # Dati cedente per emissione FatturaPA
+            "my_vat_number",
+            "cedente_codice_fiscale", "cedente_address",
+            "cedente_city", "cedente_cap", "cedente_provincia",
+            "cedente_regime_fiscale", "cedente_persona_fisica",
+            "cedente_nome", "cedente_cognome",
+        ]
         # Chiavi GLOBALI riservate all'amministratore (AppSettings)
         admin_keys = ["smtp_host", "smtp_port", "smtp_user", "smtp_password",
                       "smtp_use_tls", "stripe_webhook_secret", "paypal_webhook_id",
@@ -4166,6 +4390,7 @@ def _migrate_db():
             for col_name, col_def in [
                 ("codice_destinatario", "TEXT DEFAULT ''"),
                 ("codice_fiscale",      "TEXT DEFAULT ''"),
+                ("city",                "TEXT DEFAULT ''"),
                 ("cap",                 "TEXT DEFAULT ''"),
                 ("provincia",           "TEXT DEFAULT ''"),
                 ("nazione",             "TEXT DEFAULT 'IT'"),

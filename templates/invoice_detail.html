@@ -109,6 +109,86 @@
       </div>
     </div>
 
+    {% if inv.is_outgoing %}
+    <div class="card border-0 shadow-sm mb-4 border-start border-primary border-4">
+      <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-receipt me-1"></i> Fattura elettronica FatturaPA</span>
+        {% set sdi_labels = {
+          '': ('Non emessa', 'secondary'),
+          'draft': ('XML pronto, non inviato', 'info'),
+          'sent': ('Inviata al SDI', 'primary'),
+          'delivered': ('Consegnata al cliente', 'success'),
+          'rejected': ('Scartata dal SDI', 'danger'),
+          'decorsi_termini': ('Decorsi termini (destinatario non rintracciabile)', 'warning'),
+          'non_consegnata': ('Non consegnata', 'warning'),
+        } %}
+        {% set lbl, color = sdi_labels.get(inv.sdi_status or '', ('?', 'secondary')) %}
+        <span class="badge bg-{{ color }}">{{ lbl }}</span>
+      </div>
+      <div class="card-body">
+        <dl class="row mb-3 small">
+          <dt class="col-sm-3 text-muted">Tipo documento</dt>
+          <dd class="col-sm-9"><code>{{ inv.document_type }}</code> · {{ inv.document_type_label[0] }}</dd>
+          {% if inv.imponibile %}
+          <dt class="col-sm-3 text-muted">Imponibile</dt>
+          <dd class="col-sm-9">{{ inv.imponibile|eur }}</dd>
+          {% endif %}
+          {% if inv.iva_rate %}
+          <dt class="col-sm-3 text-muted">IVA</dt>
+          <dd class="col-sm-9">{{ inv.iva_rate }}% · {{ (inv.iva_amount or 0)|eur }}</dd>
+          {% endif %}
+          {% if inv.progressivo %}
+          <dt class="col-sm-3 text-muted">Progressivo</dt>
+          <dd class="col-sm-9"><code>{{ inv.progressivo }}/{{ inv.issue_date.year }}</code></dd>
+          {% endif %}
+          {% if inv.sdi_message_id %}
+          <dt class="col-sm-3 text-muted">ID messaggio SDI</dt>
+          <dd class="col-sm-9"><code class="small">{{ inv.sdi_message_id }}</code></dd>
+          {% endif %}
+          {% if inv.sdi_sent_at %}
+          <dt class="col-sm-3 text-muted">Inviata il</dt>
+          <dd class="col-sm-9">{{ inv.sdi_sent_at.strftime('%d/%m/%Y %H:%M') }}</dd>
+          {% endif %}
+          {% if inv.sdi_error %}
+          <dt class="col-sm-3 text-muted">Errore SDI</dt>
+          <dd class="col-sm-9 text-danger">{{ inv.sdi_error }}</dd>
+          {% endif %}
+        </dl>
+
+        {% if inv.xml_filename %}
+        <div class="d-flex gap-2 align-items-center bg-light rounded p-3 mb-3">
+          <i class="bi bi-filetype-xml text-primary fs-1"></i>
+          <div class="flex-grow-1">
+            <div class="fw-semibold">{{ inv.xml_filename }}</div>
+            <small class="text-muted">XML FatturaPA 1.2.x conforme. Inviabile via PEC al SDI.</small>
+          </div>
+          <a href="{{ url_for('download_invoice_xml', iid=inv.id) }}"
+             class="btn btn-primary">
+            <i class="bi bi-download me-1"></i> Scarica XML
+          </a>
+        </div>
+        {% endif %}
+
+        {% if inv.sdi_status not in ('sent', 'delivered') %}
+        <form method="post" action="{{ url_for('regenerate_invoice_xml', iid=inv.id) }}" class="d-inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="btn btn-outline-secondary btn-sm" type="submit"
+                  title="Utile se hai modificato dati cedente o cliente">
+            <i class="bi bi-arrow-repeat me-1"></i> Rigenera XML
+          </button>
+        </form>
+        {% endif %}
+
+        <div class="alert alert-info small mt-3 mb-0">
+          <strong>Per inviare al SDI</strong>: scarica l'XML, allegalo a una PEC e invialo a
+          <code>sdi01@pec.fatturapa.it</code> (produzione) oppure
+          <code>sdi02@pec.fatturapa.it</code> (test).
+          L'invio automatico via Aruba arriverà a breve nel piano Pro.
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
     {% if inv.pdf_filename %}
     <div class="card border-0 shadow-sm mb-4">
       <div class="card-header fw-semibold">

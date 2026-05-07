@@ -40,11 +40,97 @@
                  value="{{ client.vat_number if client else '' }}" placeholder="01234567890">
         </div>
       </div>
-      <div class="mb-4">
-        <label class="form-label fw-semibold">Indirizzo</label>
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Indirizzo (via e numero civico)</label>
         <input type="text" name="address" class="form-control"
-               value="{{ client.address if client else '' }}" placeholder="Via Roma 1, 20100 Milano">
+               value="{{ client.address if client else '' }}" placeholder="Via Roma 1">
       </div>
+
+      <!-- ─── Campi indirizzo strutturati (per FatturaPA) ─── -->
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Comune</label>
+          <input type="text" name="city" class="form-control"
+                 value="{{ client.city if client else '' }}" placeholder="Milano">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold">CAP</label>
+          <input type="text" name="cap" class="form-control"
+                 value="{{ client.cap if client else '' }}" placeholder="20100" maxlength="5"
+                 inputmode="numeric" pattern="[0-9]{5}">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold">Provincia</label>
+          <input type="text" name="provincia" class="form-control text-uppercase"
+                 value="{{ client.provincia if client else '' }}" placeholder="MI" maxlength="2">
+        </div>
+      </div>
+
+      <!-- ─── Sezione FatturaPA (per emissione) ─── -->
+      <details class="mb-4" {% if client and client.codice_destinatario %}open{% endif %}>
+        <summary class="fw-semibold text-primary mb-2" style="cursor:pointer">
+          <i class="bi bi-receipt me-1"></i>
+          Dati per fatturazione elettronica (FatturaPA SDI)
+        </summary>
+        <div class="card border-primary-subtle mt-2">
+          <div class="card-body bg-primary-subtle bg-opacity-25">
+            <p class="small text-muted mb-3">
+              Compila questi campi se vuoi <strong>emettere fatture FatturaPA</strong>
+              a questo cliente. Per ricevere via importazione lasciali pure vuoti.
+            </p>
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label class="form-label fw-semibold">Codice destinatario SDI</label>
+                <input type="text" name="codice_destinatario" class="form-control text-uppercase"
+                       value="{{ client.codice_destinatario if client else '' }}"
+                       placeholder="ABCDEFG (7 caratteri)" maxlength="7" minlength="7"
+                       pattern="[A-Z0-9]{7}">
+                <div class="form-text">
+                  7 caratteri assegnati dal cliente (es. <code>0000000</code> + PEC se è un privato).
+                </div>
+              </div>
+              <div class="col-sm-6">
+                <label class="form-label fw-semibold">Codice fiscale</label>
+                <input type="text" name="codice_fiscale" class="form-control text-uppercase"
+                       value="{{ client.codice_fiscale if client else '' }}"
+                       placeholder="RSSMRA80A01H501Z o uguale a P.IVA" maxlength="16">
+                <div class="form-text">
+                  16 caratteri per persona fisica, o uguale alla P.IVA per società.
+                </div>
+              </div>
+            </div>
+            <div class="row g-3">
+              <div class="col-sm-4">
+                <label class="form-label fw-semibold">Nazione</label>
+                <input type="text" name="nazione" class="form-control text-uppercase"
+                       value="{{ client.nazione if client else 'IT' }}"
+                       placeholder="IT" maxlength="2">
+                <div class="form-text">Codice ISO 3166 (es. IT, FR, DE).</div>
+              </div>
+              <div class="col-sm-8">
+                <label class="form-label fw-semibold">Regime fiscale</label>
+                <select name="regime_fiscale" class="form-select">
+                  {% set rf = (client.regime_fiscale if client else 'RF01') or 'RF01' %}
+                  <option value="RF01" {% if rf == 'RF01' %}selected{% endif %}>RF01 - Ordinario</option>
+                  <option value="RF02" {% if rf == 'RF02' %}selected{% endif %}>RF02 - Contribuenti minimi</option>
+                  <option value="RF04" {% if rf == 'RF04' %}selected{% endif %}>RF04 - Agricoltura</option>
+                  <option value="RF05" {% if rf == 'RF05' %}selected{% endif %}>RF05 - Vendita sali e tabacchi</option>
+                  <option value="RF06" {% if rf == 'RF06' %}selected{% endif %}>RF06 - Commercio fiammiferi</option>
+                  <option value="RF07" {% if rf == 'RF07' %}selected{% endif %}>RF07 - Editoria</option>
+                  <option value="RF11" {% if rf == 'RF11' %}selected{% endif %}>RF11 - Agenzie viaggi</option>
+                  <option value="RF12" {% if rf == 'RF12' %}selected{% endif %}>RF12 - Agriturismo</option>
+                  <option value="RF13" {% if rf == 'RF13' %}selected{% endif %}>RF13 - Vendite a domicilio</option>
+                  <option value="RF14" {% if rf == 'RF14' %}selected{% endif %}>RF14 - Beni usati / opere d'arte</option>
+                  <option value="RF17" {% if rf == 'RF17' %}selected{% endif %}>RF17 - IVA per cassa</option>
+                  <option value="RF18" {% if rf == 'RF18' %}selected{% endif %}>RF18 - Altro</option>
+                  <option value="RF19" {% if rf == 'RF19' %}selected{% endif %}>RF19 - Regime forfettario</option>
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+      </details>
+
       <div class="d-flex gap-2">
         <button type="submit" class="btn btn-primary">
           <i class="bi bi-save me-1"></i> {% if client %}Salva modifiche{% else %}Crea cliente{% endif %}

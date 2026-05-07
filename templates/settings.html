@@ -72,6 +72,119 @@
     </div>
   </div>
 
+  <!-- ─── Dati fiscali per emissione FatturaPA ─────────────────────── -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-primary border-4">
+    <div class="card-header fw-semibold bg-primary-subtle text-primary-emphasis">
+      <i class="bi bi-receipt me-1"></i> Dati fiscali per emissione FatturaPA
+      <span class="badge bg-primary ms-2">personale</span>
+    </div>
+    <div class="card-body">
+      <p class="small text-muted mb-3">
+        Questi dati appariranno come <strong>cedente</strong> nelle fatture elettroniche
+        che <strong>tu</strong> emetti tramite GestFatture (cassetto fiscale → SDI).
+        Compilali correttamente: una fattura con dati errati viene scartata dallo SDI.
+      </p>
+
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">P.IVA *</label>
+          <input type="text" name="my_vat_number" class="form-control"
+                 value="{{ settings.my_vat_number|default('', true) }}"
+                 placeholder="11 cifre" inputmode="numeric"
+                 pattern="[0-9]{11}" minlength="11" maxlength="11">
+          <div class="form-text">Senza prefisso IT, solo 11 cifre.</div>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Codice fiscale</label>
+          <input type="text" name="cedente_codice_fiscale" class="form-control text-uppercase"
+                 value="{{ settings.cedente_codice_fiscale|default('', true) }}"
+                 placeholder="Uguale a P.IVA per società" maxlength="16">
+          <div class="form-text">16 char per persona fisica, oppure uguale alla P.IVA per società.</div>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label fw-semibold">Indirizzo (via e numero civico) *</label>
+        <input type="text" name="cedente_address" class="form-control"
+               value="{{ settings.cedente_address|default('', true) }}"
+               placeholder="Via Andrea Sansovino 225">
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Comune *</label>
+          <input type="text" name="cedente_city" class="form-control"
+                 value="{{ settings.cedente_city|default('', true) }}" placeholder="Torino">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold">CAP *</label>
+          <input type="text" name="cedente_cap" class="form-control"
+                 value="{{ settings.cedente_cap|default('', true) }}"
+                 placeholder="10151" inputmode="numeric" pattern="[0-9]{5}"
+                 minlength="5" maxlength="5">
+        </div>
+        <div class="col-sm-3">
+          <label class="form-label fw-semibold">Provincia *</label>
+          <input type="text" name="cedente_provincia" class="form-control text-uppercase"
+                 value="{{ settings.cedente_provincia|default('', true) }}"
+                 placeholder="TO" maxlength="2" minlength="2">
+        </div>
+      </div>
+
+      <div class="row g-3">
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Regime fiscale *</label>
+          <select name="cedente_regime_fiscale" class="form-select">
+            {% set rf = (settings.cedente_regime_fiscale|default('RF01', true)) or 'RF01' %}
+            <option value="RF01" {% if rf == 'RF01' %}selected{% endif %}>RF01 - Ordinario</option>
+            <option value="RF02" {% if rf == 'RF02' %}selected{% endif %}>RF02 - Contribuenti minimi</option>
+            <option value="RF04" {% if rf == 'RF04' %}selected{% endif %}>RF04 - Agricoltura</option>
+            <option value="RF05" {% if rf == 'RF05' %}selected{% endif %}>RF05 - Vendita sali e tabacchi</option>
+            <option value="RF06" {% if rf == 'RF06' %}selected{% endif %}>RF06 - Commercio fiammiferi</option>
+            <option value="RF07" {% if rf == 'RF07' %}selected{% endif %}>RF07 - Editoria</option>
+            <option value="RF11" {% if rf == 'RF11' %}selected{% endif %}>RF11 - Agenzie viaggi</option>
+            <option value="RF12" {% if rf == 'RF12' %}selected{% endif %}>RF12 - Agriturismo</option>
+            <option value="RF13" {% if rf == 'RF13' %}selected{% endif %}>RF13 - Vendite a domicilio</option>
+            <option value="RF14" {% if rf == 'RF14' %}selected{% endif %}>RF14 - Beni usati / opere d'arte</option>
+            <option value="RF17" {% if rf == 'RF17' %}selected{% endif %}>RF17 - IVA per cassa</option>
+            <option value="RF18" {% if rf == 'RF18' %}selected{% endif %}>RF18 - Altro</option>
+            <option value="RF19" {% if rf == 'RF19' %}selected{% endif %}>RF19 - Regime forfettario</option>
+          </select>
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label fw-semibold">Tipo soggetto *</label>
+          <select name="cedente_persona_fisica" class="form-select">
+            {% set pf = settings.cedente_persona_fisica|default('false', true) %}
+            <option value="false" {% if pf != 'true' %}selected{% endif %}>
+              Società / Ente (uso Denominazione)
+            </option>
+            <option value="true"  {% if pf == 'true' %}selected{% endif %}>
+              Persona fisica / Ditta individuale (uso Nome + Cognome)
+            </option>
+          </select>
+          <div class="form-text">
+            Per ditta individuale o professionista, compila anche Nome e Cognome qui sotto.
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3 mt-1">
+        <div class="col-sm-6">
+          <label class="form-label">Nome (solo persona fisica)</label>
+          <input type="text" name="cedente_nome" class="form-control"
+                 value="{{ settings.cedente_nome|default('', true) }}"
+                 placeholder="Mario">
+        </div>
+        <div class="col-sm-6">
+          <label class="form-label">Cognome (solo persona fisica)</label>
+          <input type="text" name="cedente_cognome" class="form-control"
+                 value="{{ settings.cedente_cognome|default('', true) }}"
+                 placeholder="Rossi">
+        </div>
+      </div>
+    </div>
+  </div>
+
   {% if current_user.is_admin %}
   <!-- URL pubblico app (necessario per i link nelle notifiche email/WhatsApp) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">

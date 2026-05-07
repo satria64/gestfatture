@@ -179,6 +179,7 @@ class Client(db.Model):
     # ─── Campi richiesti per emissione FatturaPA ─────────────────────────────
     codice_destinatario = db.Column(db.String(10), default="")    # 7 char SDI o "0000000" (privati con PEC)
     codice_fiscale      = db.Column(db.String(20), default="")    # 16 char persona fisica o uguale a P.IVA per società
+    city                = db.Column(db.String(80), default="")    # Comune (es. "Milano", "Torino")
     cap                 = db.Column(db.String(10), default="")
     provincia           = db.Column(db.String(5),  default="")    # es. "TO", "MI", "RM"
     nazione             = db.Column(db.String(5),  default="IT")  # ISO 3166-1 alpha-2
@@ -501,6 +502,11 @@ class AuditLog(db.Model):
             "accountant_invite_accepted": ("Invito cliente accettato", "success"),
             "accountant_switch_in":   ("Switch as cliente",           "warning"),
             "accountant_switch_out":  ("Uscita da impersonation",     "info"),
+            "invoice_emitted":        ("Fattura emessa (XML generato)", "primary"),
+            "invoice_xml_regenerated":("Fattura XML rigenerato",       "info"),
+            "invoice_sdi_sent":       ("Inviata a SDI",                "primary"),
+            "invoice_sdi_delivered":  ("SDI: consegnata",              "success"),
+            "invoice_sdi_rejected":   ("SDI: scartata",                "danger"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 

@@ -1,0 +1,154 @@
+{% extends 'base.html' %}
+{% block title %}Emetti fattura – GestFatture{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center mb-4">
+  <a href="{{ url_for('invoices') }}" class="btn btn-link text-decoration-none ps-0">
+    <i class="bi bi-arrow-left"></i> Torna alle fatture
+  </a>
+</div>
+
+<h2 class="mb-3">
+  <i class="bi bi-receipt me-2"></i> Emetti nuova fattura FatturaPA
+</h2>
+<p class="text-muted mb-4">
+  Compila i campi e GestFatture genera l'XML conforme allo standard FatturaPA 1.2.x.
+  Per ora puoi <strong>scaricare l'XML</strong> e inviarlo manualmente via PEC al SDI;
+  l'invio automatico via Aruba arriverà a breve.
+</p>
+
+<div class="row">
+  <div class="col-lg-8">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <!-- Cliente -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Cliente *</label>
+            <select name="client_id" class="form-select" required>
+              <option value="">— Seleziona cliente —</option>
+              {% for c in clients %}
+                <option value="{{ c.id }}"
+                        {% if not c.codice_destinatario and not c.pec %}disabled{% endif %}>
+                  {{ c.name }}
+                  {% if c.vat_number %}(P.IVA {{ c.vat_number }}){% endif %}
+                  {% if not c.codice_destinatario and not c.pec %} ⚠ dati FatturaPA mancanti{% endif %}
+                </option>
+              {% endfor %}
+            </select>
+            <div class="form-text">
+              Solo i clienti con codice destinatario SDI o PEC sono selezionabili.
+              <a href="{{ url_for('new_client') }}">+ Nuovo cliente</a>
+            </div>
+          </div>
+
+          <!-- Numero + date -->
+          <div class="row g-3 mb-3">
+            <div class="col-sm-4">
+              <label class="form-label fw-semibold">Numero (assegnato)</label>
+              <input type="text" class="form-control" value="{{ next_number }}" readonly>
+              <div class="form-text">Numerazione progressiva annuale.</div>
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label fw-semibold">Data emissione *</label>
+              <input type="date" name="issue_date" class="form-control" required
+                     value="{{ today.strftime('%Y-%m-%d') }}">
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label fw-semibold">Data scadenza *</label>
+              <input type="date" name="due_date" class="form-control" required
+                     value="{{ today.strftime('%Y-%m-%d') }}">
+            </div>
+          </div>
+
+          <!-- Descrizione -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Descrizione prestazione *</label>
+            <textarea name="description" class="form-control" rows="3" maxlength="1000" required
+                      placeholder="Es: Consulenza tecnica per progetto X, periodo aprile-maggio 2026"></textarea>
+            <div class="form-text">
+              MVP: descrizione unica per tutta la fattura. Le righe multiple arriveranno presto.
+            </div>
+          </div>
+
+          <!-- Importi -->
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+              <label class="form-label fw-semibold">Imponibile (€) *</label>
+              <input type="number" name="imponibile" class="form-control" required
+                     step="0.01" min="0" placeholder="1000.00"
+                     oninput="updateTotale()">
+              <div class="form-text">Prezzo netto, IVA esclusa.</div>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label fw-semibold">Aliquota IVA (%) *</label>
+              <select name="iva_rate" class="form-select" onchange="updateTotale()">
+                <option value="22" selected>22% (ord.)</option>
+                <option value="10">10%</option>
+                <option value="5">5%</option>
+                <option value="4">4%</option>
+                <option value="0">0% (esente)</option>
+              </select>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label fw-semibold">Totale</label>
+              <input type="text" id="totale_preview" class="form-control fw-bold" readonly value="€ 0,00">
+              <div class="form-text">IVA inclusa.</div>
+            </div>
+          </div>
+
+          <hr class="my-4">
+
+          <button type="submit" class="btn btn-primary btn-lg">
+            <i class="bi bi-file-earmark-check me-1"></i> Emetti fattura e genera XML
+          </button>
+          <a href="{{ url_for('invoices') }}" class="btn btn-outline-secondary">Annulla</a>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card border-0 bg-info-subtle">
+      <div class="card-body">
+        <h6 class="card-title">
+          <i class="bi bi-info-circle me-1 text-primary"></i> Cosa succede dopo
+        </h6>
+        <ol class="small mb-0">
+          <li>GestFatture genera l'XML FatturaPA conforme</li>
+          <li>L'XML viene salvato e puoi scaricarlo dalla pagina di dettaglio fattura</li>
+          <li>Per ora invia tu l'XML via <strong>PEC al SDI</strong>:
+              <code>sdi01@pec.fatturapa.it</code></li>
+          <li>Quando avremo l'integrazione Aruba, l'invio sarà automatico</li>
+          <li>La fattura entra nel ciclo solleciti se non viene pagata</li>
+        </ol>
+      </div>
+    </div>
+
+    <div class="card border-0 bg-warning-subtle mt-3">
+      <div class="card-body">
+        <h6 class="card-title">
+          <i class="bi bi-exclamation-triangle me-1 text-warning"></i> Stai testando?
+        </h6>
+        <p class="small mb-0">
+          Per <strong>test</strong> non inviare al vero SDI. Puoi mandarlo all'indirizzo di
+          <a href="https://www.fatturapa.gov.it/en/strumenti-applicativi/" target="_blank">test SDI ufficiale</a>
+          (documentazione AdE) per validare la struttura senza generare adempimenti reali.
+        </p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function updateTotale() {
+  const imp = parseFloat(document.getElementsByName('imponibile')[0].value) || 0;
+  const iva = parseFloat(document.getElementsByName('iva_rate')[0].value) || 0;
+  const tot = imp * (1 + iva / 100);
+  document.getElementById('totale_preview').value = '€ ' + tot.toFixed(2).replace('.', ',');
+}
+</script>
+
+{% endblock %}
