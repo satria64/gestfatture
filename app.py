@@ -426,6 +426,9 @@ def create_app():
         # Eventuali fatture orfane
         for inv in Invoice.query.filter_by(user_id=uid).all():
             db.session.delete(inv)
+        # Relazioni commercialista (sia se questo utente era cliente, sia se era accountant)
+        AccountantClient.query.filter_by(client_user_id=uid).delete()
+        AccountantClient.query.filter_by(accountant_id=uid).delete()
         UserSetting.query.filter_by(user_id=uid).delete()
         db.session.delete(user)
         db.session.commit()
@@ -505,10 +508,13 @@ def create_app():
         from sqlalchemy import func
         from datetime import timedelta
 
-        # Clienti gestiti (relazioni attive + accettate)
+        # Clienti gestiti (relazioni attive + accettate). Filtra orfani:
+        # se l'utente cliente è stato cancellato, la riga AccountantClient resta
+        # ma client_user è None — saltala per evitare 500.
         rels = (AccountantClient.query
                 .filter_by(accountant_id=current_user.id, is_active=True)
                 .order_by(AccountantClient.created_at.desc()).all())
+        rels = [r for r in rels if r.client_user is not None]
         accepted = [r for r in rels if r.accepted_at]
         pending  = [r for r in rels if not r.accepted_at]
         client_ids = [r.client_user_id for r in accepted]
@@ -4169,6 +4175,18 @@ def _migrate_db():
                     conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col_name} {col_def}"))
                     conn.commit()
                     logging.info(f"Migrazione: aggiunta colonna clients.{col_name}")
+
+        # ─── accountant_clients: pulisci righe orfane (utente cancellato) ─────
+        if "accountant_clients" in inspector.get_table_names():
+            orphan_count = conn.execute(text("""
+                DELETE FROM accountant_clients
+                WHERE client_user_id NOT IN (SELECT id FROM users)
+                   OR accountant_id   NOT IN (SELECT id FROM users)
+            """)).rowcount
+            conn.commit()
+            if orphan_count and orphan_count > 0:
+                logging.info("Migrazione: cancellate %d righe AccountantClient orfane",
+                             orphan_count)
 
         # ─── invoices: campi emissione SDI ────────────────────────────────────
         if "invoices" in inspector.get_table_names():
