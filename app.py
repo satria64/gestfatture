@@ -15,7 +15,7 @@ from flask_limiter.util import get_remote_address
 from models import (db, Client, Invoice, Reminder, AppSettings, UserSetting,
                     User, PecMessage, SupportTicket, TicketMessage, AuditLog,
                     Bando, BandoMatch, BankAccount, BankTransaction,
-                    FiscalDeadline)
+                    FiscalDeadline, AccountantClient)
 from auth import login_manager
 from config import config
 
@@ -266,6 +266,10 @@ def create_app():
         "settings_2fa_setup", "settings_2fa_setup_verify",
         "settings_2fa_disable", "settings_2fa_regenerate",
         "change_password",
+        # Endpoint commercialista: l'accettazione invito deve passare anche
+        # per utenti senza sub (verrà legata al commercialista che paga)
+        "accountant_invitation_accept",
+        "accountant_exit_impersonation",  # esci impersonation deve passare sempre
     }
 
     @app.before_request
@@ -469,29 +473,351 @@ def create_app():
         return redirect(url_for("dashboard"))
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # FATTURAZIONE ATTIVA + DASHBOARD COMMERCIALISTI (Fase 0: scaffold)
-    # Le route reali saranno implementate in Fase 1-2. Per ora restano admin-only.
+    # FATTURAZIONE ATTIVA — placeholder (Fase 2 in arrivo)
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/invoices/new")
-    @admin_required
+    @login_required
     def new_outgoing_invoice():
-        """Form emissione nuova fattura FatturaPA (placeholder Fase 0).
-        Implementazione completa in Fase 2: form + generatore XML + invio SDI."""
-        flash("⚙️ Modulo emissione FatturaPA in sviluppo (disponibile prossimamente nel piano Pro €14,99/mese).",
-              "info")
+        """Form emissione nuova fattura FatturaPA (placeholder Fase 2)."""
+        flash("⚙️ Modulo emissione FatturaPA in sviluppo (disponibile prossimamente).", "info")
         return redirect(url_for("invoices"))
 
+    # ═══════════════════════════════════════════════════════════════════════════
+    # DASHBOARD COMMERCIALISTI (Fase 1)
+    # Un utente con is_accountant=True gestisce multipli clienti.
+    # I clienti accedono GRATIS (paga solo il commercialista).
+    # ═══════════════════════════════════════════════════════════════════════════
+    def accountant_required(f):
+        """Decorator: richiede utente autenticato con is_accountant=True (oppure admin)."""
+        @wraps(f)
+        @login_required
+        def wrapped(*args, **kwargs):
+            if not (current_user.is_accountant or current_user.is_admin):
+                flash("Sezione riservata ai commercialisti.", "warning")
+                return redirect(url_for("dashboard"))
+            return f(*args, **kwargs)
+        return wrapped
+
     @app.route("/accountant/dashboard")
-    @login_required
+    @accountant_required
     def accountant_dashboard():
-        """Dashboard commercialista (placeholder Fase 0).
-        Implementazione completa in Fase 1: lista clienti gestiti + switch as client + vista aggregate."""
-        if not (current_user.is_admin or current_user.is_accountant):
-            flash("Sezione riservata ai commercialisti (piano Pro €14,99/mese).", "warning")
+        """Panoramica del commercialista: lista clienti gestiti + KPI aggregate."""
+        # Clienti gestiti (relazioni attive + accettate)
+        rels = (AccountantClient.query
+                .filter_by(accountant_id=current_user.id, is_active=True)
+                .order_by(AccountantClient.created_at.desc()).all())
+        accepted = [r for r in rels if r.accepted_at]
+        pending  = [r for r in rels if not r.accepted_at]
+
+        # KPI aggregate sui clienti accettati
+        client_ids = [r.client_user_id for r in accepted]
+        total_open_invoices = 0
+        total_overdue_amount = 0.0
+        total_open_amount = 0.0
+        critical_alerts = 0
+        if client_ids:
+            from sqlalchemy import func
+            total_open_invoices = (Invoice.query
+                .filter(Invoice.user_id.in_(client_ids))
+                .filter(Invoice.status.in_(["pending", "overdue"]))
+                .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                .count())
+            total_overdue_amount = (db.session.query(func.coalesce(func.sum(Invoice.amount), 0.0))
+                .filter(Invoice.user_id.in_(client_ids))
+                .filter(Invoice.status == "overdue")
+                .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                .scalar() or 0.0)
+            total_open_amount = (db.session.query(func.coalesce(func.sum(Invoice.amount), 0.0))
+                .filter(Invoice.user_id.in_(client_ids))
+                .filter(Invoice.status.in_(["pending", "overdue"]))
+                .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                .scalar() or 0.0)
+            # Scadenze fiscali non completate dei prossimi 30gg
+            from datetime import timedelta
+            cutoff = date.today() + timedelta(days=30)
+            critical_alerts = (FiscalDeadline.query
+                .filter(FiscalDeadline.user_id.in_(client_ids))
+                .filter(FiscalDeadline.completed.is_(False))
+                .filter(FiscalDeadline.deadline <= cutoff)
+                .count())
+
+        # Per ogni cliente, prepara summary singolo per la lista
+        clients_summary = []
+        for rel in accepted:
+            cu = rel.client_user
+            inv_open = (Invoice.query
+                .filter_by(user_id=cu.id)
+                .filter(Invoice.status.in_(["pending", "overdue"]))
+                .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                .count())
+            inv_overdue = (Invoice.query
+                .filter_by(user_id=cu.id, status="overdue")
+                .filter(db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None)))
+                .count())
+            company = UserSetting.get(cu.id, "company_name") or cu.username
+            clients_summary.append({
+                "rel": rel, "user": cu, "company": company,
+                "inv_open": inv_open, "inv_overdue": inv_overdue,
+            })
+
+        return render_template("accountant_dashboard.html",
+                               accepted_count=len(accepted),
+                               pending_count=len(pending),
+                               clients=clients_summary,
+                               pending=pending,
+                               total_open_invoices=total_open_invoices,
+                               total_open_amount=total_open_amount,
+                               total_overdue_amount=total_overdue_amount,
+                               critical_alerts=critical_alerts)
+
+    @app.route("/accountant/clients/invite", methods=["GET", "POST"])
+    @accountant_required
+    @limiter.limit("20 per hour", methods=["POST"])
+    def accountant_invite_client():
+        """Invita un nuovo cliente nel proprio studio. Genera token firmato e manda email."""
+        if request.method == "POST":
+            email = request.form.get("email", "").strip().lower()
+            company = request.form.get("company_name", "").strip()
+            note = request.form.get("note", "").strip()
+
+            errors = []
+            if "@" not in email or "." not in email.split("@", 1)[-1]:
+                errors.append("Email non valida.")
+            if not company:
+                errors.append("Inserisci la ragione sociale del cliente.")
+            # Già invitato dallo stesso commercialista?
+            existing_user = User.query.filter_by(email=email).first()
+            if existing_user:
+                already = AccountantClient.query.filter_by(
+                    accountant_id=current_user.id,
+                    client_user_id=existing_user.id,
+                    is_active=True
+                ).first()
+                if already:
+                    errors.append("Hai già invitato/aggiunto questo cliente.")
+
+            if errors:
+                for e in errors: flash(e, "danger")
+                return render_template("accountant_invite.html",
+                                       email=email, company_name=company, note=note)
+
+            # Genera token firmato (scadenza 14gg)
+            from tokens import sign_payload
+            import secrets as _secrets
+            token_id = _secrets.token_urlsafe(24)
+            token = sign_payload({
+                "kind": "accountant_invite",
+                "accountant_id": current_user.id,
+                "email": email,
+                "company": company,
+                "note": note[:500],
+                "tid": token_id,
+            }, max_age=14 * 24 * 3600)
+
+            # Se l'utente esiste già, creiamo subito una relazione (stato pendente)
+            # Se non esiste, la relazione verrà creata all'accettazione del token (vedi
+            # accountant_invitation_accept che gestisce il caso "nuovo utente").
+            if existing_user:
+                rel = AccountantClient(
+                    accountant_id=current_user.id,
+                    client_user_id=existing_user.id,
+                    invitation_token=token_id,
+                    notes=note,
+                )
+                db.session.add(rel)
+                db.session.commit()
+
+            # Email invito
+            try:
+                _send_accountant_invitation_email(
+                    to_email=email,
+                    company_name=company,
+                    accountant_user=current_user._get_current_object(),
+                    token=token,
+                )
+            except Exception as e:
+                logging.warning("Email invito commercialista fallita: %s", e)
+
+            audit("accountant_invite_sent",
+                  target=f"email:{email}",
+                  details=f"company:{company[:80]}")
+            flash(f"📨 Invito inviato a {email}.", "success")
+            return redirect(url_for("accountant_dashboard"))
+
+        return render_template("accountant_invite.html")
+
+    @app.route("/accountant/invitation/<token>", methods=["GET", "POST"])
+    @limiter.limit("10 per hour")
+    def accountant_invitation_accept(token):
+        """Accettazione invito da parte del cliente. Crea account o lega all'esistente."""
+        from tokens import verify_payload
+        payload = verify_payload(token, max_age=14 * 24 * 3600)
+        if not payload or payload.get("kind") != "accountant_invite":
+            flash("Invito non valido o scaduto. Chiedi al tuo commercialista di rispedirlo.", "danger")
+            return redirect(url_for("login"))
+
+        accountant_id = payload.get("accountant_id")
+        invited_email = payload.get("email")
+        invited_company = payload.get("company", "")
+        accountant = User.query.get(accountant_id)
+        if not accountant or not accountant.is_accountant:
+            flash("Commercialista non più attivo.", "danger")
+            return redirect(url_for("login"))
+
+        # Se utente già loggato, lega l'invito a lui (verifica email match)
+        if current_user.is_authenticated:
+            if current_user.email and current_user.email.lower() != invited_email:
+                flash("Questo invito è destinato a un'altra email.", "warning")
+                return redirect(url_for("dashboard"))
+            rel = AccountantClient.query.filter_by(
+                accountant_id=accountant_id,
+                client_user_id=current_user.id
+            ).first()
+            if not rel:
+                rel = AccountantClient(
+                    accountant_id=accountant_id,
+                    client_user_id=current_user.id,
+                    invitation_token=payload.get("tid", ""),
+                )
+                db.session.add(rel)
+            rel.accepted_at = datetime.utcnow()
+            rel.is_active = True
+            db.session.commit()
+            audit("accountant_invite_accepted",
+                  target=f"accountant:{accountant.username}",
+                  details=f"client:{current_user.username}")
+            flash(f"✅ Sei stato collegato allo studio di {accountant.username}.", "success")
             return redirect(url_for("dashboard"))
-        flash("⚙️ Dashboard commercialisti in sviluppo (disponibile prossimamente nel piano Pro).",
+
+        # Utente non loggato: form di registrazione/login
+        if request.method == "POST":
+            mode = request.form.get("mode", "register")
+            if mode == "login":
+                username = request.form.get("username", "").strip().lower()
+                password = request.form.get("password", "")
+                u = User.query.filter_by(username=username).first()
+                if u and u.check_password(password):
+                    login_user(u)
+                    return redirect(url_for("accountant_invitation_accept", token=token))
+                flash("Credenziali errate.", "danger")
+            else:
+                # Registrazione cliente
+                username = request.form.get("username", "").strip().lower()
+                password = request.form.get("password", "")
+                vat_raw = request.form.get("vat_number", "")
+                vat_number = "".join(c for c in vat_raw if c.isdigit())
+
+                errors = []
+                if len(username) < 3 or not all(c.isalnum() or c in "_-." for c in username):
+                    errors.append("Username: minimo 3 caratteri.")
+                ok, err = User.validate_password(password)
+                if not ok: errors.append(err)
+                if len(vat_number) != 11:
+                    errors.append("La P.IVA deve essere di 11 cifre.")
+                if User.query.filter_by(username=username).first():
+                    errors.append("Username già in uso.")
+                if User.query.filter(User.email == invited_email, User.email != "").first():
+                    errors.append("Email già registrata. Effettua il login con le tue credenziali.")
+                if errors:
+                    for e in errors: flash(e, "danger")
+                    return render_template("accountant_invitation_accept.html",
+                                           accountant=accountant, invited_email=invited_email,
+                                           invited_company=invited_company, token=token,
+                                           username=username)
+
+                user = User(username=username, email=invited_email,
+                            is_admin=False, plan="free")  # niente sub: paga il commercialista
+                user.set_password(password)
+                db.session.add(user)
+                db.session.commit()
+                UserSetting.set(user.id, "company_name", invited_company)
+                UserSetting.set(user.id, "my_vat_number", vat_number)
+
+                rel = AccountantClient(
+                    accountant_id=accountant_id,
+                    client_user_id=user.id,
+                    invitation_token=payload.get("tid", ""),
+                    accepted_at=datetime.utcnow(),
+                    is_active=True,
+                )
+                db.session.add(rel)
+                db.session.commit()
+                login_user(user)
+                audit("accountant_invite_accepted",
+                      target=f"accountant:{accountant.username}",
+                      details=f"client:{username} (new account)", user=user)
+                flash(f"🎉 Account creato e collegato allo studio di {accountant.username}.", "success")
+                return redirect(url_for("dashboard"))
+
+        return render_template("accountant_invitation_accept.html",
+                               accountant=accountant,
+                               invited_email=invited_email,
+                               invited_company=invited_company,
+                               token=token)
+
+    @app.route("/accountant/switch/<int:client_user_id>", methods=["POST"])
+    @accountant_required
+    def accountant_switch(client_user_id):
+        """Impersonation: il commercialista entra nell'account del cliente.
+        Tecnica: salva commercialista in session, poi login_user(cliente)."""
+        # Verifica diritto: deve esistere relazione attiva e accettata
+        rel = AccountantClient.query.filter_by(
+            accountant_id=current_user.id,
+            client_user_id=client_user_id,
+            is_active=True,
+        ).filter(AccountantClient.accepted_at.isnot(None)).first()
+        if not rel:
+            abort(404)
+        target = User.query.get(client_user_id)
+        if not target:
+            abort(404)
+        # Salva commercialista in session per poter tornare indietro
+        session["accountant_real_user_id"] = current_user.id
+        session["accountant_real_username"] = current_user.username
+        audit("accountant_switch_in",
+              target=f"client:{target.username}",
+              details=f"as accountant {current_user.username}")
+        login_user(target)
+        flash(f"👁 Stai operando come {target.username}. Per tornare alla tua dashboard usa il banner in alto.",
               "info")
         return redirect(url_for("dashboard"))
+
+    @app.route("/accountant/exit-impersonation", methods=["POST"])
+    @login_required
+    def accountant_exit_impersonation():
+        """Esce dalla modalità impersonation, ritornando al commercialista."""
+        real_id = session.pop("accountant_real_user_id", None)
+        session.pop("accountant_real_username", None)
+        if not real_id:
+            return redirect(url_for("dashboard"))
+        accountant = User.query.get(int(real_id))
+        if not accountant or not accountant.is_accountant:
+            return redirect(url_for("dashboard"))
+        impersonated_username = current_user.username
+        audit("accountant_switch_out",
+              target=f"client:{impersonated_username}",
+              details=f"back to accountant {accountant.username}", user=accountant)
+        login_user(accountant)
+        flash("✅ Tornato alla tua dashboard commercialista.", "success")
+        return redirect(url_for("accountant_dashboard"))
+
+    @app.route("/settings/become-accountant", methods=["POST"])
+    @login_required
+    @limiter.limit("5 per hour")
+    def become_accountant():
+        """L'utente esistente con sub attiva si abilita come commercialista."""
+        if current_user.is_accountant:
+            flash("Sei già registrato come commercialista.", "info")
+            return redirect(url_for("settings"))
+        if not current_user.has_active_subscription:
+            flash("Per diventare commercialista serve una sottoscrizione Pro attiva.", "warning")
+            return redirect(url_for("billing"))
+        current_user.is_accountant = True
+        # Eventualmente aggiornare plan_tier a 'pro' quando avremo prezzo Pro separato
+        db.session.commit()
+        audit("accountant_enabled", target=f"user:{current_user.username}")
+        flash("🎉 Ora sei abilitato come commercialista. Vai alla tua dashboard studio per iniziare.", "success")
+        return redirect(url_for("accountant_dashboard"))
 
     # ═══════════════════════════════════════════════════════════════════════════
     # SIGNUP PUBBLICO (registrazione self-service → Stripe Checkout)
@@ -4003,6 +4329,90 @@ def _send_welcome_email(user, company_name: str):
     )
     if not ok:
         logging.warning("Welcome email failed for %s: %s", user.username, info)
+
+
+def _send_accountant_invitation_email(*, to_email: str, company_name: str,
+                                      accountant_user, token: str):
+    """Email di invito al cliente da parte del commercialista."""
+    if not to_email:
+        return
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.utils import formatdate, make_msgid, formataddr
+    from email_service import deliver_email
+
+    base_url = (AppSettings.get("app_external_url", "").rstrip("/")
+                or "https://app.gestfatture.com")
+    accept_url = f"{base_url}/accountant/invitation/{token}"
+    sender_name  = AppSettings.get("company_name", "GestFatture")
+    sender_email = (AppSettings.get("resend_from_email", "")
+                    or AppSettings.get("smtp_user", "")
+                    or "noreply@gestfatture.com")
+
+    accountant_company = UserSetting.get(accountant_user.id, "company_name") or accountant_user.username
+    subject = f"Invito GestFatture: {accountant_company} ti aggiunge al suo studio"
+
+    html = f"""<!DOCTYPE html>
+<html lang="it"><body style="font-family:Arial,sans-serif;color:#1f2937;line-height:1.6;background:#f8fafc;padding:24px">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.1)">
+    <div style="background:#1e3a5f;color:#fff;padding:24px 28px">
+      <h2 style="margin:0;font-size:22px">Sei stato invitato a GestFatture</h2>
+    </div>
+    <div style="padding:28px">
+      <p>Ciao <strong>{company_name}</strong>,</p>
+      <p>Il tuo commercialista <strong>{accountant_company}</strong> ti ha invitato
+         a usare <strong>GestFatture</strong> per gestire fatture, solleciti automatici,
+         scadenze fiscali e cash flow della tua azienda.</p>
+      <p style="background:#dcfce7;color:#166534;padding:12px 16px;border-radius:6px;margin:20px 0">
+         💚 <strong>Accesso completamente gratuito</strong> per te — il commercialista
+         ha già attivato il piano Pro per il suo studio.
+      </p>
+      <p style="text-align:center;margin:32px 0">
+        <a href="{accept_url}" style="background:#1e3a5f;color:#fff;padding:14px 32px;
+           border-radius:6px;text-decoration:none;font-weight:bold;display:inline-block">
+          Accetta invito e inizia →
+        </a>
+      </p>
+      <p style="font-size:13px;color:#64748b">
+        Cliccando il bottone potrai creare il tuo account in 30 secondi.
+        Il link è valido <strong>14 giorni</strong>.
+      </p>
+      <p style="font-size:12px;color:#94a3b8;margin-top:32px;border-top:1px solid #e5e7eb;padding-top:12px">
+        Se non conosci {accountant_company}, ignora questa email.<br>
+        — Il team di GestFatture
+      </p>
+    </div>
+  </div>
+</body></html>"""
+
+    plain = (
+        f"Ciao {company_name},\n\n"
+        f"Il tuo commercialista {accountant_company} ti ha invitato a usare GestFatture per "
+        f"gestire fatture, solleciti automatici, scadenze fiscali e cash flow.\n\n"
+        f"Accesso gratuito per te (paga solo il commercialista).\n\n"
+        f"Accetta invito: {accept_url}\n\n"
+        f"Link valido 14 giorni.\n\n"
+        f"— Il team di GestFatture\n"
+    )
+
+    msg = MIMEMultipart("alternative")
+    msg.attach(MIMEText(plain, "plain", "utf-8"))
+    msg.attach(MIMEText(html,  "html",  "utf-8"))
+    msg["Subject"]    = subject
+    msg["From"]       = formataddr((sender_name, sender_email))
+    msg["To"]         = to_email
+    msg["Reply-To"]   = accountant_user.email or sender_email
+    msg["Date"]       = formatdate(localtime=True)
+    msg["Message-ID"] = make_msgid(domain=sender_email.split("@")[-1] if "@" in sender_email else "gestfatture.com")
+
+    ok, info = deliver_email(
+        msg=msg, subject=subject, recipient=to_email,
+        html=html, plain=plain,
+        sender_name=sender_name, sender_email=sender_email,
+        reply_to=accountant_user.email or None,
+    )
+    if not ok:
+        logging.warning("Accountant invitation email failed for %s: %s", to_email, info)
 
 
 # ─── Avvio ────────────────────────────────────────────────────────────────────

@@ -6,6 +6,44 @@
   <h2><i class="bi bi-gear me-2"></i>Impostazioni</h2>
 </div>
 
+{% if not current_user.is_admin and not current_user.is_guest %}
+  {% if current_user.is_accountant %}
+  <div class="card border-0 shadow-sm mb-4 bg-success-subtle" style="max-width:640px">
+    <div class="card-body">
+      <h5 class="card-title mb-2">
+        <i class="bi bi-briefcase-fill me-1 text-success"></i> Sei abilitato come commercialista
+      </h5>
+      <p class="mb-3 small text-muted">
+        Gestisci tutti i tuoi clienti dalla dashboard studio. Tu paghi il piano Pro,
+        i tuoi clienti accedono gratis.
+      </p>
+      <a href="{{ url_for('accountant_dashboard') }}" class="btn btn-success">
+        <i class="bi bi-arrow-right me-1"></i> Vai al mio studio
+      </a>
+    </div>
+  </div>
+  {% else %}
+  <div class="card border-0 shadow-sm mb-4 border-start border-info border-4" style="max-width:640px">
+    <div class="card-body">
+      <h5 class="card-title mb-2">
+        <i class="bi bi-briefcase me-1 text-info"></i> Sei un commercialista?
+      </h5>
+      <p class="mb-3 small">
+        Abilita la <strong>modalità commercialista</strong>: gestisci più clienti dal
+        tuo account. I tuoi clienti accedono <strong>gratuitamente</strong> (paghi solo
+        tu il piano Pro €14,99/mese).
+      </p>
+      <form method="post" action="{{ url_for('become_accountant') }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-primary" type="submit">
+          <i class="bi bi-briefcase-fill me-1"></i> Diventa commercialista
+        </button>
+      </form>
+    </div>
+  </div>
+  {% endif %}
+{% endif %}
+
 <form method="post" style="max-width:640px">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 

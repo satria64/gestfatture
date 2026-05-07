@@ -1,0 +1,166 @@
+{% extends 'base.html' %}
+{% block title %}Studio commercialista – GestFatture{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+  <div>
+    <h2 class="mb-0">
+      <i class="bi bi-briefcase-fill me-2"></i> Studio commercialista
+    </h2>
+    <p class="text-muted small mb-0">
+      Gestisci tutti i tuoi clienti da un'unica dashboard.
+    </p>
+  </div>
+  <a href="{{ url_for('accountant_invite_client') }}" class="btn btn-primary">
+    <i class="bi bi-person-plus me-1"></i> Invita nuovo cliente
+  </a>
+</div>
+
+<!-- ─── KPI aggregate ─── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Clienti gestiti</div>
+        <div class="display-6">{{ accepted_count }}</div>
+        {% if pending_count > 0 %}
+          <div class="small text-warning">
+            <i class="bi bi-clock-history"></i> {{ pending_count }} inviti pendenti
+          </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100">
+      <div class="card-body">
+        <div class="text-muted small">Fatture aperte (totale)</div>
+        <div class="display-6">{{ total_open_invoices }}</div>
+        <div class="small text-muted">{{ total_open_amount|eur }}</div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100 {% if total_overdue_amount > 0 %}border-start border-danger border-4{% endif %}">
+      <div class="card-body">
+        <div class="text-muted small">Scaduto da incassare</div>
+        <div class="display-6 {% if total_overdue_amount > 0 %}text-danger{% endif %}">
+          {{ total_overdue_amount|eur }}
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="card border-0 shadow-sm h-100 {% if critical_alerts > 0 %}border-start border-warning border-4{% endif %}">
+      <div class="card-body">
+        <div class="text-muted small">Scadenze fiscali (≤30gg)</div>
+        <div class="display-6 {% if critical_alerts > 0 %}text-warning{% endif %}">
+          {{ critical_alerts }}
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Lista clienti ─── -->
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-white fw-semibold">
+    <i class="bi bi-people me-1"></i> I miei clienti ({{ accepted_count }})
+  </div>
+  <div class="card-body p-0">
+    {% if clients %}
+    <div class="table-responsive">
+      <table class="table table-hover mb-0 align-middle">
+        <thead class="table-light">
+          <tr>
+            <th>Cliente</th>
+            <th>Fatture aperte</th>
+            <th>In ritardo</th>
+            <th>Aggiunto</th>
+            <th class="text-end">Azioni</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in clients %}
+          <tr>
+            <td>
+              <div class="fw-semibold">{{ c.company }}</div>
+              <small class="text-muted">@{{ c.user.username }}{% if c.user.email %} · {{ c.user.email }}{% endif %}</small>
+            </td>
+            <td>
+              <span class="badge bg-primary-subtle text-primary-emphasis">{{ c.inv_open }}</span>
+            </td>
+            <td>
+              {% if c.inv_overdue > 0 %}
+                <span class="badge bg-danger">{{ c.inv_overdue }}</span>
+              {% else %}
+                <span class="text-muted">—</span>
+              {% endif %}
+            </td>
+            <td class="small text-muted">
+              {{ c.rel.accepted_at.strftime('%d/%m/%Y') if c.rel.accepted_at else '—' }}
+            </td>
+            <td class="text-end">
+              <form method="post" action="{{ url_for('accountant_switch', client_user_id=c.user.id) }}" class="d-inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button class="btn btn-sm btn-outline-primary" type="submit"
+                        title="Entra come questo cliente per vedere/operare i suoi dati">
+                  <i class="bi bi-box-arrow-in-right me-1"></i> Entra come
+                </button>
+              </form>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="text-center py-5">
+      <i class="bi bi-people text-muted" style="font-size:3rem"></i>
+      <p class="text-muted mt-3 mb-2">Non hai ancora clienti collegati.</p>
+      <a href="{{ url_for('accountant_invite_client') }}" class="btn btn-primary">
+        <i class="bi bi-person-plus me-1"></i> Invita il primo cliente
+      </a>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- ─── Inviti pendenti ─── -->
+{% if pending %}
+<div class="card border-0 shadow-sm mb-4">
+  <div class="card-header bg-warning-subtle fw-semibold">
+    <i class="bi bi-clock-history me-1"></i> Inviti pendenti ({{ pending|length }})
+  </div>
+  <ul class="list-group list-group-flush">
+    {% for p in pending %}
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+      <div>
+        <strong>{{ p.client_user.email if p.client_user else 'Email pendente' }}</strong>
+        {% if p.notes %}<br><small class="text-muted">{{ p.notes }}</small>{% endif %}
+      </div>
+      <small class="text-muted">
+        Invitato il {{ p.invited_at.strftime('%d/%m/%Y') }}
+      </small>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
+<!-- ─── Info piano ─── -->
+<div class="card border-0 shadow-sm">
+  <div class="card-body">
+    <h6 class="card-title">
+      <i class="bi bi-info-circle me-1 text-primary"></i> Come funziona
+    </h6>
+    <ul class="mb-0 small">
+      <li>I tuoi clienti accedono <strong>gratuitamente</strong> a GestFatture: paghi solo tu il piano Pro.</li>
+      <li>Ogni cliente ha il suo account separato con i suoi dati. Tu puoi entrare nei loro dati con "Entra come".</li>
+      <li>Tutte le tue azioni di "Switch as cliente" sono registrate nell'audit log per trasparenza.</li>
+      <li>Il cliente può accettare l'invito creando un nuovo account o collegando uno esistente.</li>
+    </ul>
+  </div>
+</div>
+
+{% endblock %}

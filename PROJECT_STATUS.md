@@ -273,13 +273,17 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [x] AppSettings keys per Aruba SDI (`aruba_username`, `aruba_api_key`, `aruba_api_password`, `aruba_environment`, `aruba_enabled`) + `stripe_price_id_pro`
 - [x] Scaffold route placeholder: `/invoices/new` (admin-only) e `/accountant/dashboard` (admin/accountant-only)
 
-#### Fase 1 — Dashboard commercialisti MVP (in pianificazione)
-- [ ] UI `/accountant/dashboard`: lista clienti gestiti, ricerca, ordinamento
-- [ ] Funzione "Switch as client X" (impersonation tipo admin) con audit log
-- [ ] Vista aggregate multi-cliente: scadenze fiscali totali, fatture aperte, alert critici
-- [ ] Onboarding: form invito cliente via email (token firmato 7gg)
-- [ ] Modello pricing: commercialista paga €14,99/mese, clienti accedono gratis via invito
-- [ ] Bonus oltre 20 clienti gestiti (logica da definire: sconto/cashback/piano scontato)
+#### Fase 1 — Dashboard commercialisti MVP ✅
+- [x] UI `/accountant/dashboard`: lista clienti gestiti + KPI aggregate (fatture aperte, scaduto, scadenze fiscali ≤30gg)
+- [x] Funzione "Entra come" cliente (impersonation via re-login) con banner e audit log
+- [x] Onboarding: form `/accountant/clients/invite` + email invito firmata (token 14gg)
+- [x] Pagina pubblica `/accountant/invitation/<token>` con tab Registrazione/Login
+- [x] `User.has_active_subscription` esteso: clienti gestiti da accountant attivo passano gratis
+- [x] Bottone "Diventa commercialista" in `/settings` per upgrade utente esistente
+- [x] Voce sidebar dinamica "Studio" per `is_accountant=True`
+- [x] Banner impersonation in `base.html` con "Esci e torna allo studio"
+- [x] Audit labels nuovi: accountant_enabled, invite_sent, invite_accepted, switch_in/out
+- [ ] Bonus oltre 20 clienti gestiti (da definire — Fase 1.5)
 
 #### Fase 2 — Fatturazione attiva (UI + Aruba sandbox)
 - [ ] Form `/invoices/new` con tutti i campi FatturaPA (cliente, codice destinatario, righe, IVA, ritenute)

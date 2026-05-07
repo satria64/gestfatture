@@ -118,3 +118,25 @@ def make_survey_url(survey, base_url: str = "") -> str:
     base_url = base_url.rstrip("/")
     token = make_survey_token(survey.id, survey.ticket_id)
     return f"{base_url}/survey/{token}"
+
+
+# ─── Accountant invitations ─────────────────────────────────────────────────
+ACCOUNTANT_SALT    = "gestfatture-accountant-invite-v1"
+ACCOUNTANT_MAX_AGE = 60 * 60 * 24 * 14  # 14 giorni
+
+
+def _accountant_serializer():
+    return URLSafeTimedSerializer(current_app.config["SECRET_KEY"], salt=ACCOUNTANT_SALT)
+
+
+def sign_payload(payload: dict, max_age: int = ACCOUNTANT_MAX_AGE) -> str:
+    """Token firmato generico per inviti commercialista (e simili)."""
+    return _accountant_serializer().dumps(payload)
+
+
+def verify_payload(token: str, max_age: int = ACCOUNTANT_MAX_AGE) -> dict | None:
+    try:
+        payload = _accountant_serializer().loads(token, max_age=max_age)
+        return payload if isinstance(payload, dict) else None
+    except (BadSignature, SignatureExpired):
+        return None

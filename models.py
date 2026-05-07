@@ -77,14 +77,42 @@ class User(db.Model, UserMixin):
     @property
     def has_active_subscription(self) -> bool:
         """L'utente ha accesso operativo all'app:
-        admin/ospite passano sempre; gli altri devono avere trial valido o sub attiva."""
+        admin/ospite passano sempre; gli altri devono avere trial valido o sub attiva.
+        I clienti gestiti da un commercialista con sub attiva accedono GRATIS."""
         if self.is_admin or self.is_guest:
             return True
         if self.subscription_status in ("trialing", "active"):
             return True
         if self.trial_ends_at and self.trial_ends_at > datetime.utcnow():
             return True
+        # Clienti gestiti da un commercialista attivo (Modello A: paga solo l'accountant)
+        rel = AccountantClient.query.filter_by(
+            client_user_id=self.id, is_active=True
+        ).filter(AccountantClient.accepted_at.isnot(None)).first()
+        if rel and rel.accountant_id != self.id:
+            acc = rel.accountant
+            if acc and (acc.is_admin
+                        or acc.subscription_status in ("trialing", "active")
+                        or (acc.trial_ends_at and acc.trial_ends_at > datetime.utcnow())):
+                return True
         return False
+
+    @property
+    def managing_accountant(self):
+        """Restituisce l'utente commercialista che gestisce questo utente, se esiste."""
+        rel = AccountantClient.query.filter_by(
+            client_user_id=self.id, is_active=True
+        ).filter(AccountantClient.accepted_at.isnot(None)).first()
+        return rel.accountant if rel else None
+
+    @property
+    def managed_clients_count(self):
+        """Numero di clienti attualmente gestiti da questo utente come commercialista."""
+        if not self.is_accountant:
+            return 0
+        return AccountantClient.query.filter_by(
+            accountant_id=self.id, is_active=True
+        ).filter(AccountantClient.accepted_at.isnot(None)).count()
 
     @property
     def subscription_label(self):
@@ -468,6 +496,11 @@ class AuditLog(db.Model):
             "subscription_paid":      ("Pagamento sub. ricevuto",     "success"),
             "subscription_payment_failed": ("Pagamento sub. fallito", "danger"),
             "billing_portal_open":    ("Customer portal aperto",      "info"),
+            "accountant_enabled":     ("Commercialista abilitato",    "primary"),
+            "accountant_invite_sent": ("Invito cliente inviato",      "info"),
+            "accountant_invite_accepted": ("Invito cliente accettato", "success"),
+            "accountant_switch_in":   ("Switch as cliente",           "warning"),
+            "accountant_switch_out":  ("Uscita da impersonation",     "info"),
         }
         return labels.get(self.action, (self.action, "secondary"))
 

@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block title %}Invita cliente – GestFatture{% endblock %}
+{% block content %}
+
+<div class="d-flex align-items-center mb-4">
+  <a href="{{ url_for('accountant_dashboard') }}" class="btn btn-link text-decoration-none ps-0">
+    <i class="bi bi-arrow-left"></i> Torna al studio
+  </a>
+</div>
+
+<h2 class="mb-3">
+  <i class="bi bi-person-plus me-2"></i> Invita un nuovo cliente
+</h2>
+
+<div class="row">
+  <div class="col-lg-7">
+    <div class="card border-0 shadow-sm">
+      <div class="card-body">
+        <form method="post" autocomplete="off">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Email del cliente</label>
+            <input type="email" name="email" class="form-control" required autofocus
+                   value="{{ email|default('', true) }}"
+                   placeholder="cliente@azienda.it">
+            <div class="form-text">
+              Riceverà un'email con un link per accettare l'invito (valido 14 giorni).
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Ragione sociale del cliente</label>
+            <input type="text" name="company_name" class="form-control" required
+                   value="{{ company_name|default('', true) }}"
+                   placeholder="es. Rossi & C. Srl" maxlength="200">
+            <div class="form-text">
+              Apparirà nell'email di invito e nei tuoi elenchi.
+            </div>
+          </div>
+
+          <div class="mb-4">
+            <label class="form-label fw-semibold">Note interne (opzionali)</label>
+            <textarea name="note" class="form-control" rows="3" maxlength="500"
+                      placeholder="Es: Cliente acquisito a maggio, contabilità trimestrale, ecc.">{{ note|default('', true) }}</textarea>
+            <div class="form-text">Solo tu le vedi, non sono visibili al cliente.</div>
+          </div>
+
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-envelope-paper me-1"></i> Invia invito
+          </button>
+          <a href="{{ url_for('accountant_dashboard') }}" class="btn btn-outline-secondary">
+            Annulla
+          </a>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-5">
+    <div class="card border-0 bg-info-subtle">
+      <div class="card-body">
+        <h6 class="card-title">
+          <i class="bi bi-info-circle me-1 text-primary"></i> Cosa succede dopo
+        </h6>
+        <ol class="small mb-0">
+          <li>Il cliente riceve un'email da <code>noreply@gestfatture.com</code></li>
+          <li>Click sul link → atterra su una pagina di benvenuto personalizzata</li>
+          <li>Crea il proprio account (o fa login se ne ha già uno) → si collega al tuo studio</li>
+          <li>Da quel momento <strong>accede gratis</strong>: paghi solo tu</li>
+          <li>Tu lo vedi nella tua dashboard studio e puoi entrare nei suoi dati con "Entra come"</li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

@@ -156,6 +156,15 @@
         </a>
       </li>
       {% endif %}
+      {% if current_user.is_authenticated and current_user.is_accountant %}
+      <li>
+        <a href="{{ url_for('accountant_dashboard') }}"
+           class="nav-link text-white {% if 'accountant' in (request.endpoint or '') %}active{% endif %}">
+          <i class="bi bi-briefcase-fill me-2"></i> Studio
+          <span class="badge bg-success ms-1" style="font-size:.6rem">PRO</span>
+        </a>
+      </li>
+      {% endif %}
       {% if current_user.is_authenticated and current_user.is_admin %}
       <li>
         <a href="{{ url_for('integrations') }}"
@@ -243,6 +252,25 @@
 
   <!-- Contenuto -->
   <main class="flex-grow-1 p-4">
+    {% if session.get('accountant_real_user_id') %}
+    <!-- Banner impersonation: il commercialista sta operando come uno dei suoi clienti -->
+    <div class="alert alert-warning d-flex align-items-center justify-content-between mb-3"
+         style="border-left:4px solid #f59e0b">
+      <div>
+        <i class="bi bi-eye-fill me-2"></i>
+        <strong>Modalità impersonation</strong> —
+        Stai operando come <strong>{{ current_user.username }}</strong>
+        (commercialista: <em>{{ session.get('accountant_real_username') or 'N/D' }}</em>).
+        Tutte le azioni sono registrate nell'audit log.
+      </div>
+      <form method="post" action="{{ url_for('accountant_exit_impersonation') }}" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="btn btn-sm btn-warning" type="submit">
+          <i class="bi bi-box-arrow-left me-1"></i> Esci e torna al mio studio
+        </button>
+      </form>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% for cat, msg in messages %}
         <div class="alert alert-{{ cat }} alert-dismissible fade show" role="alert">
