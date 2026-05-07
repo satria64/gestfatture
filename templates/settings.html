@@ -6,7 +6,7 @@
   <h2><i class="bi bi-gear me-2"></i>Impostazioni</h2>
 </div>
 
-{% if not current_user.is_admin and not current_user.is_guest %}
+{% if not current_user.is_guest %}
   {% if current_user.is_accountant %}
   <div class="card border-0 shadow-sm mb-4 bg-success-subtle" style="max-width:640px">
     <div class="card-body">
