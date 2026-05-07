@@ -256,6 +256,57 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [x] **Crittografia at-rest dei secret** (Fernet AES-128) — opt-in via env `SECRETS_ENCRYPTION_KEY`, retrocompatibile, bottone "Cifra secret esistenti" in /admin/metrics
 - [x] **Backup S3 settimanali** — lunedì 03:00 in automatico, supporta AWS/Backblaze/R2/Spaces/Minio (qualsiasi S3-compatibile), retention configurabile, dashboard /admin/backups
 
+### 🚧 Roadmap V2 — Fatturazione attiva + Dashboard commercialisti (in sviluppo)
+
+**Obiettivo**: trasformare GestFatture da "gestione fatture importate" a **prodotto completo** con emissione FatturaPA via SDI + canale di vendita B2B2C tramite commercialisti.
+
+**Posizionamento finale**:
+- **Base €9,99/mese** (IVA inclusa) — importazione + solleciti + cash flow + bandi (attuale)
+- **Pro €14,99/mese** (IVA inclusa) — Base + emissione FatturaPA + dashboard commercialisti
+
+#### Fase 0 — Scaffold DB ✅
+- [x] Estensione `User`: `plan_tier` (base/pro), `is_accountant`
+- [x] Estensione `Client`: `codice_destinatario`, `codice_fiscale`, `cap`, `provincia`, `nazione`, `regime_fiscale`
+- [x] Estensione `Invoice`: `is_outgoing`, `xml_filename`, `progressivo`, `imponibile`, `iva_rate`, `iva_amount`, `sdi_status`, `sdi_message_id`, `sdi_sent_at`, `sdi_error`
+- [x] Nuovo modello `AccountantClient` (relazione N:N commercialista ↔ clienti gestiti)
+- [x] Migration auto delle 14+ nuove colonne via `_migrate_db()`
+- [x] AppSettings keys per Aruba SDI (`aruba_username`, `aruba_api_key`, `aruba_api_password`, `aruba_environment`, `aruba_enabled`) + `stripe_price_id_pro`
+- [x] Scaffold route placeholder: `/invoices/new` (admin-only) e `/accountant/dashboard` (admin/accountant-only)
+
+#### Fase 1 — Dashboard commercialisti MVP (in pianificazione)
+- [ ] UI `/accountant/dashboard`: lista clienti gestiti, ricerca, ordinamento
+- [ ] Funzione "Switch as client X" (impersonation tipo admin) con audit log
+- [ ] Vista aggregate multi-cliente: scadenze fiscali totali, fatture aperte, alert critici
+- [ ] Onboarding: form invito cliente via email (token firmato 7gg)
+- [ ] Modello pricing: commercialista paga €14,99/mese, clienti accedono gratis via invito
+- [ ] Bonus oltre 20 clienti gestiti (logica da definire: sconto/cashback/piano scontato)
+
+#### Fase 2 — Fatturazione attiva (UI + Aruba sandbox)
+- [ ] Form `/invoices/new` con tutti i campi FatturaPA (cliente, codice destinatario, righe, IVA, ritenute)
+- [ ] Generatore XML FatturaPA 1.2.x conforme specifiche AdE
+- [ ] Integrazione **Aruba Fatturazione Elettronica API** (sandbox per test)
+- [ ] Polling ricevute SDI: consegnata / scartata / decorsi termini
+- [ ] Numerazione progressiva automatica per anno (campo `progressivo`)
+- [ ] Aggiornamento stato fattura via webhook/polling Aruba
+
+#### Fase 3 — Edge cases + UI polish
+- [ ] TD04 Nota di Credito (con riferimento fattura originale)
+- [ ] TD06 Parcella professionista
+- [ ] Ritenuta d'acconto (RT01-RT06)
+- [ ] Cassa previdenziale (TC01-TC22)
+- [ ] Esenzioni IVA (Natura N1-N7)
+- [ ] Anteprima PDF prima invio
+- [ ] Bozze salvate
+
+#### Fase 4 — Production rollout
+- [ ] Switch Aruba sandbox → production (account vero, contratto)
+- [ ] Conservazione sostitutiva 10 anni attivata
+- [ ] Stripe LIVE: creazione price_id Pro €14,99/mese
+- [ ] Test E2E con fatture reali
+- [ ] Lancio Pro: comunicazione clienti esistenti, pricing page aggiornata, upselling Base→Pro
+
+---
+
 ### Bug noti / cose da rivedere
 - Email vanno in spam (manca SPF/DKIM/DMARC sul dominio del mittente — risolvibile con Resend)
 - Eventuali nomi clienti vecchi sbagliati: usare "Unifica duplicati" + ri-import

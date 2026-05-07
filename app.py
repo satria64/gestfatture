@@ -469,6 +469,31 @@ def create_app():
         return redirect(url_for("dashboard"))
 
     # ═══════════════════════════════════════════════════════════════════════════
+    # FATTURAZIONE ATTIVA + DASHBOARD COMMERCIALISTI (Fase 0: scaffold)
+    # Le route reali saranno implementate in Fase 1-2. Per ora restano admin-only.
+    # ═══════════════════════════════════════════════════════════════════════════
+    @app.route("/invoices/new")
+    @admin_required
+    def new_outgoing_invoice():
+        """Form emissione nuova fattura FatturaPA (placeholder Fase 0).
+        Implementazione completa in Fase 2: form + generatore XML + invio SDI."""
+        flash("⚙️ Modulo emissione FatturaPA in sviluppo (disponibile prossimamente nel piano Pro €14,99/mese).",
+              "info")
+        return redirect(url_for("invoices"))
+
+    @app.route("/accountant/dashboard")
+    @login_required
+    def accountant_dashboard():
+        """Dashboard commercialista (placeholder Fase 0).
+        Implementazione completa in Fase 1: lista clienti gestiti + switch as client + vista aggregate."""
+        if not (current_user.is_admin or current_user.is_accountant):
+            flash("Sezione riservata ai commercialisti (piano Pro €14,99/mese).", "warning")
+            return redirect(url_for("dashboard"))
+        flash("⚙️ Dashboard commercialisti in sviluppo (disponibile prossimamente nel piano Pro).",
+              "info")
+        return redirect(url_for("dashboard"))
+
+    # ═══════════════════════════════════════════════════════════════════════════
     # SIGNUP PUBBLICO (registrazione self-service → Stripe Checkout)
     # ═══════════════════════════════════════════════════════════════════════════
     @app.route("/register", methods=["GET", "POST"])
@@ -3659,6 +3684,51 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE users ADD COLUMN current_period_end DATETIME"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna users.current_period_end")
+            if "plan_tier" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN plan_tier TEXT DEFAULT 'base'"))
+                conn.execute(text("UPDATE users SET plan_tier = 'base' WHERE plan_tier IS NULL"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.plan_tier")
+            if "is_accountant" not in existing_u:
+                conn.execute(text("ALTER TABLE users ADD COLUMN is_accountant INTEGER DEFAULT 0"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna users.is_accountant")
+
+        # ─── clients: campi FatturaPA ─────────────────────────────────────────
+        if "clients" in inspector.get_table_names():
+            existing_cli2 = {c["name"] for c in inspector.get_columns("clients")}
+            for col_name, col_def in [
+                ("codice_destinatario", "TEXT DEFAULT ''"),
+                ("codice_fiscale",      "TEXT DEFAULT ''"),
+                ("cap",                 "TEXT DEFAULT ''"),
+                ("provincia",           "TEXT DEFAULT ''"),
+                ("nazione",             "TEXT DEFAULT 'IT'"),
+                ("regime_fiscale",      "TEXT DEFAULT 'RF01'"),
+            ]:
+                if col_name not in existing_cli2:
+                    conn.execute(text(f"ALTER TABLE clients ADD COLUMN {col_name} {col_def}"))
+                    conn.commit()
+                    logging.info(f"Migrazione: aggiunta colonna clients.{col_name}")
+
+        # ─── invoices: campi emissione SDI ────────────────────────────────────
+        if "invoices" in inspector.get_table_names():
+            existing_inv = {c["name"] for c in inspector.get_columns("invoices")}
+            for col_name, col_def in [
+                ("is_outgoing",     "INTEGER DEFAULT 0"),
+                ("xml_filename",    "TEXT DEFAULT ''"),
+                ("progressivo",     "INTEGER"),
+                ("imponibile",      "REAL"),
+                ("iva_rate",        "REAL DEFAULT 22.0"),
+                ("iva_amount",      "REAL"),
+                ("sdi_status",      "TEXT DEFAULT ''"),
+                ("sdi_message_id",  "TEXT DEFAULT ''"),
+                ("sdi_sent_at",     "DATETIME"),
+                ("sdi_error",       "TEXT DEFAULT ''"),
+            ]:
+                if col_name not in existing_inv:
+                    conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {col_name} {col_def}"))
+                    conn.commit()
+                    logging.info(f"Migrazione: aggiunta colonna invoices.{col_name}")
 
         # ── Tabella bank_accounts (per refactoring GoCardless → Tink) ────────
         if "bank_accounts" in inspector.get_table_names():
@@ -3714,8 +3784,15 @@ def _seed_settings():
         # ─── Sottoscrizione SaaS (signup pubblico → Stripe Checkout) ─────
         "stripe_secret_key":      "",   # sk_live_... per gestire subscription
         "stripe_publishable_key": "",   # pk_live_... (mostrabile lato client)
-        "stripe_price_id":        "",   # price_... del piano €9,99/mese (IVA inclusa)
+        "stripe_price_id":        "",   # price_... del piano Base €9,99/mese (IVA inclusa)
+        "stripe_price_id_pro":    "",   # price_... del piano Pro €14,99/mese (emissione + commercialisti)
         "signup_enabled":         "true",  # toggle per disabilitare signup pubblici
+        # ─── Aruba SDI per emissione FatturaPA (Fase 2) ───────────────────
+        "aruba_username":         "",      # username Aruba Fatturazione Elettronica
+        "aruba_api_key":          "",      # API key Aruba (cifrata at-rest)
+        "aruba_api_password":     "",      # password API Aruba (cifrata at-rest)
+        "aruba_environment":      "sandbox",  # sandbox / production
+        "aruba_enabled":          "false", # toggle master fatturazione attiva
     }
     for k, v in defaults.items():
         if not AppSettings.get(k):

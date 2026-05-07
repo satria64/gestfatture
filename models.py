@@ -45,6 +45,11 @@ class User(db.Model, UserMixin):
     # trialing | active | past_due | canceled | unpaid | incomplete | incomplete_expired
     trial_ends_at          = db.Column(db.DateTime, nullable=True)
     current_period_end     = db.Column(db.DateTime, nullable=True)
+    # Tier del piano: "base" (€9,99/mese, importazione + solleciti) oppure
+    # "pro" (€14,99/mese, include emissione FatturaPA via SDI + dashboard commercialisti)
+    plan_tier              = db.Column(db.String(20), default="base", nullable=False, index=True)
+    # Flag commercialista: utente Pro che gestisce multipli clienti via /accountant/dashboard
+    is_accountant          = db.Column(db.Boolean, default=False, nullable=False, index=True)
 
     def set_password(self, password: str):
         self.password_hash = generate_password_hash(password)
@@ -143,6 +148,13 @@ class Client(db.Model):
     # Flag dual-role: un'anagrafica può essere cliente, fornitore, o entrambi
     is_supplier  = db.Column(db.Boolean, default=False, nullable=False, index=True)
     iban         = db.Column(db.String(40), default="")  # utile per fornitori (per fare bonifici)
+    # ─── Campi richiesti per emissione FatturaPA ─────────────────────────────
+    codice_destinatario = db.Column(db.String(10), default="")    # 7 char SDI o "0000000" (privati con PEC)
+    codice_fiscale      = db.Column(db.String(20), default="")    # 16 char persona fisica o uguale a P.IVA per società
+    cap                 = db.Column(db.String(10), default="")
+    provincia           = db.Column(db.String(5),  default="")    # es. "TO", "MI", "RM"
+    nazione             = db.Column(db.String(5),  default="IT")  # ISO 3166-1 alpha-2
+    regime_fiscale      = db.Column(db.String(10), default="RF01") # RF01-RF18, default = ordinario
     created_at   = db.Column(db.DateTime, default=datetime.utcnow)
 
     invoices = db.relationship("Invoice", back_populates="client", cascade="all, delete-orphan")
@@ -205,6 +217,19 @@ class Invoice(db.Model):
     pdf_filename       = db.Column(db.String(255), default="")
     user_notified_at   = db.Column(db.DateTime, nullable=True)  # quando è stato notificato il titolare di scadenza
     notes              = db.Column(db.Text, default="")
+    # ─── Emissione FatturaPA via SDI (Aruba) ────────────────────────────────
+    # True solo per fatture EMESSE da GestFatture (non solo importate da PDF/XML/PEC)
+    is_outgoing        = db.Column(db.Boolean, default=False, nullable=False, index=True)
+    xml_filename       = db.Column(db.String(255), default="")  # nome file XML FatturaPA generato
+    progressivo        = db.Column(db.Integer, nullable=True)   # numerazione progressiva univoca per anno
+    imponibile         = db.Column(db.Float,  nullable=True)    # base imponibile (amount = imponibile + iva)
+    iva_rate           = db.Column(db.Float,  default=22.0)     # aliquota IVA in %
+    iva_amount         = db.Column(db.Float,  nullable=True)    # importo IVA calcolato
+    # SDI status: "" (non emessa) / draft / sent / delivered / rejected / decorsi_termini / non_consegnata
+    sdi_status         = db.Column(db.String(40), default="")
+    sdi_message_id     = db.Column(db.String(80), default="")   # ID restituito da Aruba/SDI
+    sdi_sent_at        = db.Column(db.DateTime, nullable=True)
+    sdi_error          = db.Column(db.Text, default="")
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")
@@ -300,7 +325,41 @@ SENSITIVE_APP_KEYS = {
     "backup_s3_secret_access_key",
     "gocardless_secret_id", "gocardless_secret_key",  # legacy, dormiente
     "tink_client_id", "tink_client_secret",
+    "aruba_api_key", "aruba_api_password",  # Aruba SDI per emissione FatturaPA
+    "aruba_username",
 }
+
+
+class AccountantClient(db.Model):
+    """Relazione N:N fra un utente commercialista (User.is_accountant=True) e
+    i suoi clienti (altri User che lui gestisce). Il commercialista paga il piano
+    Pro €14,99/mese e i suoi clienti accedono gratis via invito."""
+    __tablename__ = "accountant_clients"
+    __table_args__ = (db.UniqueConstraint("accountant_id", "client_user_id",
+                                          name="uq_accountant_client"),)
+
+    id                = db.Column(db.Integer, primary_key=True)
+    accountant_id     = db.Column(db.Integer, db.ForeignKey("users.id"),
+                                  nullable=False, index=True)
+    client_user_id    = db.Column(db.Integer, db.ForeignKey("users.id"),
+                                  nullable=False, index=True)
+    invited_at        = db.Column(db.DateTime, default=datetime.utcnow)
+    accepted_at       = db.Column(db.DateTime, nullable=True)
+    invitation_token  = db.Column(db.String(80), default="")  # token firmato per accettare invito
+    is_active         = db.Column(db.Boolean, default=True, nullable=False)
+    notes             = db.Column(db.Text, default="")        # note del commercialista sul cliente
+    created_at        = db.Column(db.DateTime, default=datetime.utcnow)
+
+    accountant  = db.relationship("User", foreign_keys=[accountant_id])
+    client_user = db.relationship("User", foreign_keys=[client_user_id])
+
+    @property
+    def status_label(self):
+        if not self.is_active:
+            return ("Disattivato", "secondary")
+        if self.accepted_at:
+            return ("Attivo", "success")
+        return ("Invito pendente", "warning")
 
 
 class UserSetting(db.Model):
