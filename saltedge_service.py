@@ -94,45 +94,84 @@ def _delete(path: str) -> dict:
 
 
 # ─── Customer management ──────────────────────────────────────────────────
+def _find_customer_by_identifier(identifier: str) -> str | None:
+    """Cerca un customer Salt Edge by identifier iterando la lista paginata.
+    Salt Edge v6 NON supporta filtro per identifier nella query, quindi
+    iteriamo. In pending/test mode i customers sono pochi (max 100)."""
+    next_id = None
+    for _ in range(20):  # max 20 pagine ~= 20.000 customers (sufficiente)
+        params = {}
+        if next_id:
+            params["from_id"] = next_id
+        try:
+            data = _get("/customers", params=params)
+        except Exception as e:
+            log.warning("Salt Edge: errore search customers: %s", e)
+            return None
+        items = data.get("data", []) or []
+        for c in items:
+            if c.get("identifier") == identifier:
+                return str(c.get("id"))
+        meta = data.get("meta", {}) or {}
+        next_id = meta.get("next_id")
+        if not next_id:
+            break
+    return None
+
+
 def get_or_create_customer(user_id: int) -> str:
     """Restituisce il customer_id Salt Edge per un utente GestFatture.
-    Se l'utente è già stato collegato in passato, riusa il customer_id salvato
-    in BankAccount.saltedge_customer_id. Altrimenti crea un nuovo Customer."""
-    from models import BankAccount
+    Strategia (in ordine):
+      1. Cache in UserSetting('saltedge_customer_id') (più veloce)
+      2. Riuso da BankAccount.saltedge_customer_id esistente
+      3. Search by identifier su Salt Edge (gestisce duplicates da tentativi falliti)
+      4. POST /customers (creazione nuova, fallback a search se duplicate)
+    Salva il customer_id in UserSetting per riusi futuri."""
+    from models import UserSetting, BankAccount
     identifier = f"gestfatture-user-{user_id}"
 
-    # Riusa customer_id salvato in altri BankAccount dello stesso utente
+    # 1. Cache UserSetting
+    cached = UserSetting.get(user_id, "saltedge_customer_id")
+    if cached:
+        return cached
+
+    # 2. Riuso da BankAccount esistente
     existing_ba = (BankAccount.query
                    .filter_by(user_id=user_id)
                    .filter(BankAccount.saltedge_customer_id != "")
                    .first())
     if existing_ba and existing_ba.saltedge_customer_id:
-        log.info("Salt Edge: riuso customer_id %s per user %d",
+        log.info("Salt Edge: customer_id da BankAccount %s per user %d",
                  existing_ba.saltedge_customer_id, user_id)
+        UserSetting.set(user_id, "saltedge_customer_id",
+                        existing_ba.saltedge_customer_id)
         return existing_ba.saltedge_customer_id
 
+    # 3. Search by identifier (recupera customers creati in tentativi precedenti)
+    found = _find_customer_by_identifier(identifier)
+    if found:
+        log.info("Salt Edge: customer esistente %s recuperato via search per user %d",
+                 found, user_id)
+        UserSetting.set(user_id, "saltedge_customer_id", found)
+        return found
+
+    # 4. Crea nuovo
     try:
         data = _post("/customers", {"data": {"identifier": identifier}})
         customer_id = data.get("data", {}).get("id")
         if customer_id:
             log.info("Salt Edge: creato customer %s per user %d", customer_id, user_id)
+            UserSetting.set(user_id, "saltedge_customer_id", str(customer_id))
             return str(customer_id)
         raise RuntimeError(f"Salt Edge: response /customers senza id: {data}")
     except RuntimeError as e:
         msg = str(e).lower()
-        # Se duplicate, recupera l'esistente
-        if "duplicate" in msg or "already" in msg or "DuplicatedCustomer".lower() in msg:
-            try:
-                data = _get("/customers", params={"identifier": identifier})
-                items = data.get("data", []) or []
-                if items and items[0].get("id"):
-                    cid = str(items[0]["id"])
-                    log.info("Salt Edge: recuperato customer esistente %s per user %d",
-                             cid, user_id)
-                    return cid
-            except Exception as e2:
-                log.error("Salt Edge: recupero customer fallito dopo duplicate: %s", e2)
-        # Propaga il messaggio dettagliato
+        # Race condition: customer creato tra search e POST
+        if "duplicate" in msg or "already" in msg or "duplicatedcustomer" in msg:
+            found = _find_customer_by_identifier(identifier)
+            if found:
+                UserSetting.set(user_id, "saltedge_customer_id", found)
+                return found
         raise RuntimeError(f"Salt Edge customers API failed: {e}")
 
 
