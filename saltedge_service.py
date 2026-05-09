@@ -200,8 +200,10 @@ def build_link_url(redirect_url: str, state: str, market: str = "IT",
             "country_code": (market or "IT").upper(),
         }
     }
-    data = _post("/connect_sessions/create", payload)
-    connect_url = data.get("data", {}).get("connect_url")
+    # V6: l'endpoint è /connections/connect (rinominato da v5 /connect_sessions/create)
+    data = _post("/connections/connect", payload)
+    connect_url = data.get("data", {}).get("connect_url") or \
+                  data.get("data", {}).get("redirect_url")
     if not connect_url:
         raise RuntimeError(f"Salt Edge: connect_url mancante in response: {data}")
     return connect_url
@@ -265,8 +267,9 @@ def list_connections_for_customer(customer_id: str) -> list[dict]:
 
 
 def refresh_connection(connection_id: str) -> dict:
-    """Triggera un refresh non-interattivo della connection (entro 90gg da SCA)."""
-    return _put(f"/connections/{connection_id}/refresh", {})
+    """Triggera un refresh non-interattivo della connection (entro 90gg da SCA).
+    V6: POST (non più PUT)."""
+    return _post(f"/connections/{connection_id}/refresh", {})
 
 
 # ─── Sync transactions in DB ─────────────────────────────────────────────
@@ -489,11 +492,12 @@ def auto_reconcile_user(db, user_id: int, score_threshold: int = 80) -> dict:
 
 
 def disconnect_account(db, bank_account) -> bool:
-    """Cancella la connection lato Salt Edge + scarta token locali."""
+    """Cancella la connection lato Salt Edge + scarta token locali.
+    V6: DELETE /connections/{id} (senza /remove suffix)."""
     conn_id = (bank_account.requisition_id or "").strip()
     if conn_id:
         try:
-            _delete(f"/connections/{conn_id}/remove")
+            _delete(f"/connections/{conn_id}")
         except Exception as e:
             log.warning("Salt Edge disconnect fallito (continuo lato locale): %s", e)
     bank_account.status = "disabled"
