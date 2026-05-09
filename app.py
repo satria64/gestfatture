@@ -1396,7 +1396,7 @@ def create_app():
     @login_required
     @limiter.limit("10 per hour")
     def bank_connect():
-        """Avvia il flow Tink Link: redirect a Tink per scegliere la banca."""
+        """Avvia il flow Salt Edge Connect Widget: redirect per scegliere banca + SCA."""
         from bank_service import build_link_url
         import secrets as _secrets
         try:
@@ -1405,83 +1405,109 @@ def create_app():
             redirect_url = f"{base_url}/my-integrations/bank/callback"
             state = _secrets.token_urlsafe(24)
             session["bank_link_state"] = state
-            url = build_link_url(redirect_url, state, market="IT", locale="it_IT")
-            audit("bank_connect_start", target="tink", details=f"state:{state[:10]}")
+            url = build_link_url(redirect_url, state,
+                                 market="IT", locale="it_IT",
+                                 user_id=current_user.id)
+            audit("bank_connect_start", target="saltedge", details=f"state:{state[:10]}")
             return redirect(url)
         except Exception as e:
-            logging.exception("Errore avvio Tink Link")
+            logging.exception("Errore avvio Salt Edge Connect")
             flash(f"❌ Errore: {e}", "danger")
             return redirect(url_for("bank_overview"))
 
     @app.route("/my-integrations/bank/callback")
     @login_required
     def bank_callback():
-        """Callback Tink Link: ?code=...&state=... → exchange + fetch accounts."""
-        from bank_service import (exchange_code, list_user_accounts)
-        code = request.args.get("code", "").strip()
-        state = request.args.get("state", "").strip()
+        """Callback Salt Edge: ?connection_id=...&customer_id=...&custom_fields={state:..}
+        Salt Edge include tutti i dati nei query params (non serve exchange code)."""
+        from bank_service import (list_user_accounts_for_connection,
+                                  list_connections_for_customer)
+        connection_id = request.args.get("connection_id", "").strip()
+        customer_id   = request.args.get("customer_id", "").strip()
+        # Salt Edge passa custom_fields come query param JSON-encoded
+        cf_raw = request.args.get("custom_fields", "")
+        state_from_query = ""
+        if cf_raw:
+            try:
+                import json as _json
+                state_from_query = _json.loads(cf_raw).get("state", "")
+            except Exception:
+                pass
+        # In alcuni flussi il state arriva come query separato
+        if not state_from_query:
+            state_from_query = request.args.get("state", "").strip()
         expected_state = session.pop("bank_link_state", None)
-        error = request.args.get("error", "")
+        error_class = request.args.get("error_class", "")
+        error_msg = request.args.get("error_message", "")
 
-        if error:
-            flash(f"❌ Connessione annullata: {error}", "warning")
+        if error_class:
+            flash(f"❌ Connessione annullata: {error_class} {error_msg}", "warning")
+            audit("bank_connect_failed", details=f"{error_class}: {error_msg[:100]}")
             return redirect(url_for("bank_overview"))
-        if not code:
-            flash("Sessione scaduta o code mancante.", "warning")
+        if not connection_id:
+            flash("Sessione scaduta o connection_id mancante.", "warning")
             return redirect(url_for("bank_overview"))
-        if not expected_state or state != expected_state:
+        # State check (best-effort: Salt Edge a volte non rimanda i custom_fields)
+        if expected_state and state_from_query and state_from_query != expected_state:
             flash("State CSRF non valido. Riprova.", "danger")
             audit("bank_connect_failed", details="state mismatch")
             return redirect(url_for("bank_overview"))
 
         try:
-            base_url = AppSettings.get("app_external_url", "").rstrip("/") \
-                       or request.host_url.rstrip("/")
-            redirect_url = f"{base_url}/my-integrations/bank/callback"
-            tok_data = exchange_code(code, redirect_url)
-            access_token  = tok_data["access_token"]
-            refresh_token = tok_data.get("refresh_token", "")
-            expires_in    = int(tok_data.get("expires_in", 3600))
-            token_exp     = datetime.utcnow() + timedelta(seconds=expires_in)
-            access_exp    = datetime.utcnow() + timedelta(days=90)
+            # Recupera info connection per provider name/code
+            provider_code = ""
+            provider_name = "Banca"
+            if customer_id:
+                conns = list_connections_for_customer(customer_id)
+                for c in conns:
+                    if str(c.get("id")) == str(connection_id):
+                        provider_code = c.get("provider_code", "") or ""
+                        provider_name = c.get("provider_name", "") or "Banca"
+                        break
 
-            accounts = list_user_accounts(access_token)
+            # Fetch accounts della connection
+            accounts = list_user_accounts_for_connection(connection_id)
             saved = 0
+            access_exp = datetime.utcnow() + timedelta(days=90)
             for acc in accounts:
-                ext_id = acc.get("id", "")
+                ext_id = str(acc.get("id", ""))
                 if not ext_id:
                     continue
                 if BankAccount.query.filter_by(
                     user_id=current_user.id, external_account_id=ext_id
                 ).first():
                     continue
-                identifiers = acc.get("identifiers", {}) or {}
-                iban = ((identifiers.get("iban", {}) or {}).get("iban") or "")
-                fin = acc.get("financialInstitutionId", "") or ""
-                name = acc.get("name", "") or acc.get("type", "")
+                extra = acc.get("extra", {}) or {}
+                iban = (extra.get("iban") or extra.get("account_number") or "")
+                name = acc.get("name", "") or acc.get("nature", "Conto")
+                try:
+                    balance = float(acc.get("balance") or 0)
+                except Exception:
+                    balance = None
                 ba = BankAccount(
                     user_id=current_user.id,
-                    requisition_id="",  # non usato con Tink
+                    requisition_id=str(connection_id)[:80],   # connection_id Salt Edge
+                    saltedge_customer_id=str(customer_id)[:80] if customer_id else "",
                     external_account_id=ext_id[:80],
-                    iban=iban[:40],
-                    institution_id=fin[:80],
-                    institution_name=(fin or "Banca")[:120],
-                    name=name[:200],
-                    currency=(acc.get("currencyCode") or "EUR"),
+                    iban=str(iban)[:40],
+                    institution_id=str(provider_code)[:80],
+                    institution_name=str(provider_name)[:120],
+                    name=str(name)[:200],
+                    currency=(acc.get("currency_code") or "EUR"),
                     status="linked",
                     expires_at=access_exp,
-                    access_token=access_token,
-                    refresh_token=refresh_token,
-                    token_expires_at=token_exp,
+                    last_balance=balance,
+                    last_balance_at=datetime.utcnow() if balance is not None else None,
                 )
                 db.session.add(ba)
                 saved += 1
             db.session.commit()
-            audit("bank_connect_ok", target="tink", details=f"{saved} conti")
+            audit("bank_connect_ok", target="saltedge",
+                  details=f"{saved} conti, provider={provider_code}")
             flash(f"✅ {saved} conto/i collegato/i. Click 'Sincronizza' per scaricare le transazioni.",
                   "success")
         except Exception as e:
-            logging.exception("Errore Tink callback")
+            logging.exception("Errore Salt Edge callback")
             audit("bank_connect_failed", details=str(e)[:200])
             flash(f"❌ Errore: {e}", "danger")
         return redirect(url_for("bank_overview"))
@@ -3632,6 +3658,7 @@ def create_app():
                       "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix",
                       "gocardless_secret_id", "gocardless_secret_key",
                       "tink_client_id", "tink_client_secret",
+                      "saltedge_app_id", "saltedge_app_secret", "saltedge_environment",
                       "stripe_secret_key", "stripe_publishable_key", "stripe_price_id",
                       "signup_enabled"]
 
@@ -3649,6 +3676,7 @@ def create_app():
                              "backup_s3_secret_access_key",
                              "gocardless_secret_key",
                              "tink_client_secret",
+                             "saltedge_app_id", "saltedge_app_secret",
                              "stripe_secret_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
@@ -4456,6 +4484,10 @@ def _migrate_db():
                 conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN last_balance_at DATETIME"))
                 conn.commit()
                 logging.info("Migrazione: aggiunta colonna bank_accounts.last_balance_at")
+            if "saltedge_customer_id" not in existing_ba:
+                conn.execute(text("ALTER TABLE bank_accounts ADD COLUMN saltedge_customer_id TEXT DEFAULT ''"))
+                conn.commit()
+                logging.info("Migrazione: aggiunta colonna bank_accounts.saltedge_customer_id")
 
         # ── Multi-tenant: user_id su clients e invoices ──────────────────────
         admin_id_row = conn.execute(text("SELECT MIN(id) FROM users WHERE is_admin = 1")).fetchone()
@@ -4496,6 +4528,10 @@ def _seed_settings():
         "aruba_api_password":     "",      # password API Aruba (cifrata at-rest)
         "aruba_environment":      "sandbox",  # sandbox / production
         "aruba_enabled":          "false", # toggle master fatturazione attiva
+        # ─── Salt Edge AIS PSD2 (riconciliazione bancaria, sostituisce Tink) ──
+        "saltedge_app_id":        "",      # App ID Salt Edge (cifrato at-rest)
+        "saltedge_app_secret":    "",      # Secret Salt Edge (cifrato at-rest)
+        "saltedge_environment":   "pending",  # pending / test / live
     }
     for k, v in defaults.items():
         if not AppSettings.get(k):

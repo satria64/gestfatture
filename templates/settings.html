@@ -481,36 +481,51 @@
     </div>
   </div>
 
-  <!-- Tink (riconciliazione bancaria PSD2) -->
+  <!-- Salt Edge (riconciliazione bancaria PSD2) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">
-      <i class="bi bi-bank me-1"></i> Tink (riconciliazione bancaria)
+      <i class="bi bi-bank me-1"></i> Salt Edge (riconciliazione bancaria PSD2)
       <span class="badge bg-warning text-dark ms-2">ADMIN</span>
     </div>
     <div class="card-body">
       <div class="alert alert-info py-2 small mb-3">
-        Provider PSD2 (Visa) per il collegamento ai conti bancari italiani in sola lettura.
-        Free tier per sviluppatori, poi a consumo.
+        Provider PSD2 per il collegamento ai conti bancari italiani in sola lettura.
+        <strong>Pending mode</strong>: 10 connessioni con fake banks (gratis, sviluppo).
+        <strong>Test mode</strong>: 100 connessioni reali gratis (richiede approvazione).
+        <strong>Live mode</strong>: ~€99/mese Pay as You Go.
         <ol class="mb-0 mt-2">
-          <li>Registrati su <a href="https://console.tink.com/" target="_blank">console.tink.com</a> (Tink Developer Console)</li>
-          <li>Crea un'app → ottieni <strong>Client ID</strong> e <strong>Client Secret</strong></li>
-          <li>Aggiungi il <strong>Redirect URI</strong>:
-              <code>https://gestfatture.com/my-integrations/bank/callback</code></li>
-          <li>Abilita lo scope <code>accounts:read,transactions:read,credentials:read</code></li>
-          <li>Copia le credenziali qui sotto</li>
+          <li>Registrati su <a href="https://www.saltedge.com" target="_blank">saltedge.com</a></li>
+          <li>Settings → Applications → Crea applicazione → Add API key (Service)</li>
+          <li>Copia <strong>App ID</strong> + <strong>Secret</strong> (lo vedi una volta sola)</li>
+          <li>Redirect URI da impostare nell'app Salt Edge:
+              <code>{{ settings.app_external_url or 'https://app.gestfatture.com' }}/my-integrations/bank/callback</code></li>
+          <li>Per passare a Test mode (banche reali), click "Request access" nel banner della dashboard Salt Edge</li>
         </ol>
       </div>
       <div class="row g-3">
         <div class="col-md-6">
-          <label class="form-label fw-semibold">Tink Client ID</label>
-          <input type="text" name="tink_client_id" class="form-control font-monospace"
-                 value="{{ settings.tink_client_id }}" placeholder="UUID">
+          <label class="form-label fw-semibold">Salt Edge App ID</label>
+          <input type="text" name="saltedge_app_id" class="form-control font-monospace"
+                 placeholder="(lascia vuoto per non modificare)">
+          <div class="form-text">L'App ID della key di tipo <strong>Service</strong>.</div>
         </div>
         <div class="col-md-6">
-          <label class="form-label fw-semibold">Tink Client Secret</label>
-          <input type="password" name="tink_client_secret" class="form-control"
-                 value="{{ settings.tink_client_secret }}">
-          <div class="form-text">Lascia vuoto per non modificare. Verrà cifrato at-rest.</div>
+          <label class="form-label fw-semibold">Salt Edge Secret</label>
+          <input type="password" name="saltedge_app_secret" class="form-control"
+                 placeholder="(lascia vuoto per non modificare)">
+          <div class="form-text">Il Secret accoppiato all'App ID. Verrà cifrato at-rest.</div>
+        </div>
+      </div>
+      <div class="mt-3">
+        <label class="form-label fw-semibold">Environment</label>
+        <select name="saltedge_environment" class="form-select" style="max-width:240px">
+          {% set env = (settings.saltedge_environment|default('pending', true)) or 'pending' %}
+          <option value="pending" {% if env == 'pending' %}selected{% endif %}>Pending (fake banks, dev)</option>
+          <option value="test"    {% if env == 'test' %}selected{% endif %}>Test (banche reali, gratis)</option>
+          <option value="live"    {% if env == 'live' %}selected{% endif %}>Live (produzione, a pagamento)</option>
+        </select>
+        <div class="form-text">
+          Riferimento UI per sapere in che modalità sei. Le credenziali API funzionano in tutte le modalità Salt Edge.
         </div>
       </div>
     </div>

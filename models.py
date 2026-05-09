@@ -353,7 +353,8 @@ SENSITIVE_APP_KEYS = {
     "paypal_webhook_id", "resend_api_key",
     "backup_s3_secret_access_key",
     "gocardless_secret_id", "gocardless_secret_key",  # legacy, dormiente
-    "tink_client_id", "tink_client_secret",
+    "tink_client_id", "tink_client_secret",  # legacy, sostituito da Salt Edge
+    "saltedge_app_id", "saltedge_app_secret",  # Salt Edge AIS PSD2
     "aruba_api_key", "aruba_api_password",  # Aruba SDI per emissione FatturaPA
     "aruba_username",
 }
@@ -777,10 +778,12 @@ class BankAccount(db.Model):
     expires_at           = db.Column(db.DateTime, nullable=True)  # quando scade l'autorizzazione PSD2 (90 gg)
     last_sync_at         = db.Column(db.DateTime, nullable=True)
     last_error           = db.Column(db.Text, default="")
-    # Tink user-level OAuth tokens (cifrati at-rest se SECRETS_ENCRYPTION_KEY)
+    # Tink user-level OAuth tokens (legacy, ora sostituito da Salt Edge connection)
     access_token         = db.Column(db.Text, default="")
     refresh_token        = db.Column(db.Text, default="")
     token_expires_at     = db.Column(db.DateTime, nullable=True)
+    # Salt Edge: identifica l'utente lato Salt Edge (richiesto prima di creare connessioni)
+    saltedge_customer_id = db.Column(db.String(80), default="", index=True)
     # Saldo conto (booked balance) aggiornato a ogni sync — usato dal cash flow forecast
     last_balance         = db.Column(db.Float, nullable=True)
     last_balance_at      = db.Column(db.DateTime, nullable=True)
