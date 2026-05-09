@@ -111,7 +111,9 @@ def _find_customer_by_identifier(identifier: str) -> str | None:
         items = data.get("data", []) or []
         for c in items:
             if c.get("identifier") == identifier:
-                return str(c.get("id"))
+                cid = c.get("id")
+                if cid is not None:
+                    return str(cid)
         meta = data.get("meta", {}) or {}
         next_id = meta.get("next_id")
         if not next_id:
@@ -179,16 +181,24 @@ def get_or_create_customer(user_id: int) -> str:
 def build_link_url(redirect_url: str, state: str, market: str = "IT",
                    locale: str = "it_IT", user_id: int | None = None) -> str:
     """Genera l'URL Salt Edge Connect Widget per il flow PSD2.
-    Compat. con la signature di bank_service.py (Tink), ma richiede user_id.
-    Lo state è anti-CSRF e identifica la sessione (passato come `attempt.custom_fields`)."""
+    V6 schema: customer_id è integer; scopes sono accounts/holder_info/transactions."""
     if user_id is None:
         raise RuntimeError("Salt Edge build_link_url: user_id obbligatorio")
     customer_id = get_or_create_customer(user_id)
+    if not customer_id:
+        raise RuntimeError(f"Salt Edge: customer_id non disponibile per user {user_id}")
+    # V6 richiede customer_id come integer
+    try:
+        customer_id_int = int(customer_id)
+    except (TypeError, ValueError):
+        raise RuntimeError(f"Salt Edge: customer_id non numerico: {customer_id!r}")
+
     payload = {
         "data": {
-            "customer_id": customer_id,
+            "customer_id": customer_id_int,
             "consent": {
-                "scopes": ["account_details", "transactions_details"],
+                # V6 scopes: accounts, holder_info, transactions (non i nomi V5)
+                "scopes": ["accounts", "transactions"],
                 "from_date": (date.today() - timedelta(days=90)).isoformat(),
             },
             "attempt": {
@@ -200,7 +210,7 @@ def build_link_url(redirect_url: str, state: str, market: str = "IT",
             "country_code": (market or "IT").upper(),
         }
     }
-    # V6: l'endpoint è /connections/connect (rinominato da v5 /connect_sessions/create)
+    # V6: /connections/connect (rinominato da v5 /connect_sessions/create)
     data = _post("/connections/connect", payload)
     connect_url = data.get("data", {}).get("connect_url") or \
                   data.get("data", {}).get("redirect_url")
