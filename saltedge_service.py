@@ -94,6 +94,18 @@ def _delete(path: str) -> dict:
 
 
 # ─── Customer management ──────────────────────────────────────────────────
+def _is_valid_customer_id(v) -> bool:
+    """Salt Edge V6 customer.id è sempre un integer positivo serializzato come stringa.
+    Scarta None, "", "None"/"null" letterali e non-numerici (cache inquinata da
+    tentativi precedenti)."""
+    if v is None:
+        return False
+    s = str(v).strip()
+    if not s or s.lower() in ("none", "null"):
+        return False
+    return s.isdigit()
+
+
 def _find_customer_by_identifier(identifier: str) -> str | None:
     """Cerca un customer Salt Edge by identifier iterando la lista paginata.
     Salt Edge v6 NON supporta filtro per identifier nella query, quindi
@@ -132,26 +144,29 @@ def get_or_create_customer(user_id: int) -> str:
     from models import UserSetting, BankAccount
     identifier = f"gestfatture-user-{user_id}"
 
-    # 1. Cache UserSetting
+    # 1. Cache UserSetting (scarta valori non-numerici da tentativi precedenti)
     cached = UserSetting.get(user_id, "saltedge_customer_id")
     if cached:
-        return cached
+        if _is_valid_customer_id(cached):
+            return str(cached).strip()
+        log.warning("Salt Edge: cache UserSetting inquinata per user %d (valore=%r), la ignoro",
+                    user_id, cached)
+        UserSetting.set(user_id, "saltedge_customer_id", "")
 
     # 2. Riuso da BankAccount esistente
     existing_ba = (BankAccount.query
                    .filter_by(user_id=user_id)
                    .filter(BankAccount.saltedge_customer_id != "")
                    .first())
-    if existing_ba and existing_ba.saltedge_customer_id:
-        log.info("Salt Edge: customer_id da BankAccount %s per user %d",
-                 existing_ba.saltedge_customer_id, user_id)
-        UserSetting.set(user_id, "saltedge_customer_id",
-                        existing_ba.saltedge_customer_id)
-        return existing_ba.saltedge_customer_id
+    if existing_ba and _is_valid_customer_id(existing_ba.saltedge_customer_id):
+        cid = str(existing_ba.saltedge_customer_id).strip()
+        log.info("Salt Edge: customer_id da BankAccount %s per user %d", cid, user_id)
+        UserSetting.set(user_id, "saltedge_customer_id", cid)
+        return cid
 
     # 3. Search by identifier (recupera customers creati in tentativi precedenti)
     found = _find_customer_by_identifier(identifier)
-    if found:
+    if found and _is_valid_customer_id(found):
         log.info("Salt Edge: customer esistente %s recuperato via search per user %d",
                  found, user_id)
         UserSetting.set(user_id, "saltedge_customer_id", found)
@@ -161,17 +176,18 @@ def get_or_create_customer(user_id: int) -> str:
     try:
         data = _post("/customers", {"data": {"identifier": identifier}})
         customer_id = data.get("data", {}).get("id")
-        if customer_id:
-            log.info("Salt Edge: creato customer %s per user %d", customer_id, user_id)
-            UserSetting.set(user_id, "saltedge_customer_id", str(customer_id))
-            return str(customer_id)
-        raise RuntimeError(f"Salt Edge: response /customers senza id: {data}")
+        if _is_valid_customer_id(customer_id):
+            cid = str(customer_id).strip()
+            log.info("Salt Edge: creato customer %s per user %d", cid, user_id)
+            UserSetting.set(user_id, "saltedge_customer_id", cid)
+            return cid
+        raise RuntimeError(f"Salt Edge: response /customers senza id valido: {data}")
     except RuntimeError as e:
         msg = str(e).lower()
         # Race condition: customer creato tra search e POST
         if "duplicate" in msg or "already" in msg or "duplicatedcustomer" in msg:
             found = _find_customer_by_identifier(identifier)
-            if found:
+            if found and _is_valid_customer_id(found):
                 UserSetting.set(user_id, "saltedge_customer_id", found)
                 return found
         raise RuntimeError(f"Salt Edge customers API failed: {e}")

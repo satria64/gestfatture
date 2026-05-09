@@ -1424,6 +1424,11 @@ def create_app():
                                   list_connections_for_customer)
         connection_id = request.args.get("connection_id", "").strip()
         customer_id   = request.args.get("customer_id", "").strip()
+        # Salt Edge a volte rimanda "None"/"null" letterali se il widget abortisce
+        if customer_id.lower() in ("none", "null"):
+            customer_id = ""
+        if connection_id.lower() in ("none", "null"):
+            connection_id = ""
         # Salt Edge passa custom_fields come query param JSON-encoded
         cf_raw = request.args.get("custom_fields", "")
         state_from_query = ""
