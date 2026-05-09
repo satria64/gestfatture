@@ -7,7 +7,7 @@
     <h2><i class="bi bi-bank me-2"></i>Banche collegate</h2>
     <p class="text-muted small mb-0">
       Collega i tuoi conti bancari via PSD2 per riconciliare automaticamente
-      i pagamenti ricevuti con le fatture aperte. Provider: Tink (Visa).
+      i pagamenti ricevuti con le fatture aperte. Provider: Salt Edge.
     </p>
   </div>
   <div class="d-flex gap-2">
@@ -22,6 +22,26 @@
     </a>
   </div>
 </div>
+
+{# Cleanup conti residui dell'integrazione Tink legacy (post-switch a Salt Edge) #}
+{% set legacy_count = accounts|selectattr('saltedge_customer_id', 'equalto', '')|list|length %}
+{% if legacy_count > 0 %}
+<div class="alert alert-warning d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <i class="bi bi-exclamation-triangle me-1"></i>
+    <strong>{{ legacy_count }} conti residui</strong> dall'integrazione precedente (Tink).
+    Questi conti non funzionano più — puoi rimuoverli per fare ordine.
+    Le transazioni già scaricate andranno perse, ma puoi ricollegare la banca via Salt Edge.
+  </div>
+  <form method="post" action="{{ url_for('bank_cleanup_legacy') }}" class="m-0">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="btn btn-sm btn-warning" type="submit"
+            onclick="return confirm('Rimuovere {{ legacy_count }} conti legacy? Le transazioni associate verranno cancellate.')">
+      <i class="bi bi-trash me-1"></i> Rimuovi tutti
+    </button>
+  </form>
+</div>
+{% endif %}
 
 {% if accounts %}
 <div class="row g-3">

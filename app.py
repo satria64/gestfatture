@@ -1541,6 +1541,28 @@ def create_app():
         flash("Conto bancario scollegato. Le transazioni storiche restano per la riconciliazione.", "info")
         return redirect(url_for("bank_overview"))
 
+    @app.route("/my-integrations/bank/cleanup-legacy", methods=["POST"])
+    @login_required
+    @limiter.limit("5 per hour")
+    def bank_cleanup_legacy():
+        """Cancella conti residui Tink legacy (senza saltedge_customer_id e
+        senza connection_id valido). Pulizia dopo migrazione provider."""
+        legacy = (BankAccount.query
+                  .filter_by(user_id=current_user.id)
+                  .filter(BankAccount.saltedge_customer_id == "")
+                  .all())
+        # Cancella anche le transazioni associate (cascade non sempre attivo)
+        deleted = 0
+        for ba in legacy:
+            BankTransaction.query.filter_by(bank_account_id=ba.id).delete()
+            db.session.delete(ba)
+            deleted += 1
+        db.session.commit()
+        audit("bank_cleanup_legacy", target=f"user:{current_user.username}",
+              details=f"{deleted} conti rimossi")
+        flash(f"✅ {deleted} conti residui (legacy Tink) rimossi.", "success")
+        return redirect(url_for("bank_overview"))
+
     @app.route("/bank/reconciliation")
     @login_required
     def bank_reconciliation():

@@ -56,58 +56,84 @@ def _headers() -> dict:
 def _post(path: str, payload: dict) -> dict:
     r = requests.post(f"{SALTEDGE_API_URL}{path}",
                       json=payload, headers=_headers(), timeout=HTTP_TIMEOUT)
+    log.info("Salt Edge POST %s → %d", path, r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"Salt Edge POST {path} → {r.status_code}: {r.text[:300]}")
+        log.error("Salt Edge POST %s body: %s", path, r.text[:1000])
+        raise RuntimeError(f"Salt Edge POST {path} → {r.status_code}: {r.text[:500]}")
     return r.json()
 
 
 def _get(path: str, params: dict | None = None) -> dict:
     r = requests.get(f"{SALTEDGE_API_URL}{path}",
                      params=params or {}, headers=_headers(), timeout=HTTP_TIMEOUT)
+    log.info("Salt Edge GET %s → %d", path, r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"Salt Edge GET {path} → {r.status_code}: {r.text[:300]}")
+        log.error("Salt Edge GET %s body: %s", path, r.text[:1000])
+        raise RuntimeError(f"Salt Edge GET {path} → {r.status_code}: {r.text[:500]}")
     return r.json()
 
 
 def _put(path: str, payload: dict | None = None) -> dict:
     r = requests.put(f"{SALTEDGE_API_URL}{path}",
                      json=payload or {}, headers=_headers(), timeout=HTTP_TIMEOUT)
+    log.info("Salt Edge PUT %s → %d", path, r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"Salt Edge PUT {path} → {r.status_code}: {r.text[:300]}")
+        log.error("Salt Edge PUT %s body: %s", path, r.text[:1000])
+        raise RuntimeError(f"Salt Edge PUT {path} → {r.status_code}: {r.text[:500]}")
     return r.json()
 
 
 def _delete(path: str) -> dict:
     r = requests.delete(f"{SALTEDGE_API_URL}{path}",
                         headers=_headers(), timeout=HTTP_TIMEOUT)
+    log.info("Salt Edge DELETE %s → %d", path, r.status_code)
     if r.status_code >= 400:
-        raise RuntimeError(f"Salt Edge DELETE {path} → {r.status_code}: {r.text[:300]}")
+        log.error("Salt Edge DELETE %s body: %s", path, r.text[:1000])
+        raise RuntimeError(f"Salt Edge DELETE {path} → {r.status_code}: {r.text[:500]}")
     return r.json() if r.text else {}
 
 
 # ─── Customer management ──────────────────────────────────────────────────
 def get_or_create_customer(user_id: int) -> str:
     """Restituisce il customer_id Salt Edge per un utente GestFatture.
-    Crea un nuovo Customer se non esiste. Identifier univoco lato Salt Edge."""
+    Se l'utente è già stato collegato in passato, riusa il customer_id salvato
+    in BankAccount.saltedge_customer_id. Altrimenti crea un nuovo Customer."""
+    from models import BankAccount
     identifier = f"gestfatture-user-{user_id}"
+
+    # Riusa customer_id salvato in altri BankAccount dello stesso utente
+    existing_ba = (BankAccount.query
+                   .filter_by(user_id=user_id)
+                   .filter(BankAccount.saltedge_customer_id != "")
+                   .first())
+    if existing_ba and existing_ba.saltedge_customer_id:
+        log.info("Salt Edge: riuso customer_id %s per user %d",
+                 existing_ba.saltedge_customer_id, user_id)
+        return existing_ba.saltedge_customer_id
+
     try:
-        # Tentativo creazione: se già esiste, Salt Edge restituisce duplicate_customer
         data = _post("/customers", {"data": {"identifier": identifier}})
         customer_id = data.get("data", {}).get("id")
         if customer_id:
+            log.info("Salt Edge: creato customer %s per user %d", customer_id, user_id)
             return str(customer_id)
+        raise RuntimeError(f"Salt Edge: response /customers senza id: {data}")
     except RuntimeError as e:
-        # Se duplicate, recupera l'esistente via search
-        if "duplicate" in str(e).lower() or "already" in str(e).lower():
+        msg = str(e).lower()
+        # Se duplicate, recupera l'esistente
+        if "duplicate" in msg or "already" in msg or "DuplicatedCustomer".lower() in msg:
             try:
                 data = _get("/customers", params={"identifier": identifier})
                 items = data.get("data", []) or []
-                if items:
-                    return str(items[0]["id"])
-            except Exception:
-                pass
-        raise
-    raise RuntimeError(f"Salt Edge: impossibile creare/recuperare customer per user {user_id}")
+                if items and items[0].get("id"):
+                    cid = str(items[0]["id"])
+                    log.info("Salt Edge: recuperato customer esistente %s per user %d",
+                             cid, user_id)
+                    return cid
+            except Exception as e2:
+                log.error("Salt Edge: recupero customer fallito dopo duplicate: %s", e2)
+        # Propaga il messaggio dettagliato
+        raise RuntimeError(f"Salt Edge customers API failed: {e}")
 
 
 # ─── Connessione: Connect Session ─────────────────────────────────────────
