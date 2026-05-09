@@ -108,11 +108,12 @@ def _is_valid_customer_id(v) -> bool:
 
 def _find_customer_by_identifier(identifier: str) -> str | None:
     """Cerca un customer Salt Edge by identifier iterando la lista paginata.
-    Salt Edge v6 NON supporta filtro per identifier nella query, quindi
-    iteriamo. In pending/test mode i customers sono pochi (max 100)."""
+    V6 NON supporta filtro server-side per identifier, quindi paginiamo.
+    Importante: V6 ritorna il campo come `customer_id` (non `id`!) — vedi
+    https://docs.saltedge.com/v6/api_reference#customers-list."""
     next_id = None
     for _ in range(20):  # max 20 pagine ~= 20.000 customers (sufficiente)
-        params = {}
+        params = {"per_page": 1000}
         if next_id:
             params["from_id"] = next_id
         try:
@@ -123,7 +124,8 @@ def _find_customer_by_identifier(identifier: str) -> str | None:
         items = data.get("data", []) or []
         for c in items:
             if c.get("identifier") == identifier:
-                cid = c.get("id")
+                # V6: campo è customer_id; fallback a id per future compat
+                cid = c.get("customer_id") or c.get("id")
                 if cid is not None:
                     return str(cid)
         meta = data.get("meta", {}) or {}
@@ -175,7 +177,9 @@ def get_or_create_customer(user_id: int) -> str:
     # 4. Crea nuovo
     try:
         data = _post("/customers", {"data": {"identifier": identifier}})
-        customer_id = data.get("data", {}).get("id")
+        # V6: response ha customer_id (non id); fallback a id per safety
+        d = data.get("data", {}) or {}
+        customer_id = d.get("customer_id") or d.get("id")
         if _is_valid_customer_id(customer_id):
             cid = str(customer_id).strip()
             log.info("Salt Edge: creato customer %s per user %d", cid, user_id)
