@@ -226,6 +226,10 @@ def build_link_url(redirect_url: str, state: str, market: str = "IT",
                 "fetch_scopes": ["accounts", "transactions"],
                 "custom_fields": {"state": state},
                 "locale": locale[:2],  # Salt Edge usa "it", "en"...
+                # V6: di default NON appende connection_id/error_class al return_to.
+                # Senza questi flag il callback riceve request.args vuoto.
+                "return_connection_id": True,
+                "return_error_class": True,
             },
             "country_code": (market or "IT").upper(),
         }

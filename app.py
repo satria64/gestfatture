@@ -1422,6 +1422,10 @@ def create_app():
         Salt Edge include tutti i dati nei query params (non serve exchange code)."""
         from bank_service import (list_user_accounts_for_connection,
                                   list_connections_for_customer)
+        # Diagnostica: logga tutti i query params che Salt Edge passa al return.
+        # Aiuta a debuggare schema callback nelle versioni V6 future.
+        logging.info("Salt Edge callback args: %s",
+                     {k: v[:100] for k, v in request.args.items()})
         connection_id = request.args.get("connection_id", "").strip()
         customer_id   = request.args.get("customer_id", "").strip()
         # Salt Edge a volte rimanda "None"/"null" letterali se il widget abortisce
