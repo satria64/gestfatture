@@ -1460,23 +1460,30 @@ def create_app():
 
         try:
             # Recupera info connection per provider name/code
+            # V6 può ritornare il campo come "id" o "connection_id" (doc inconsistente)
             provider_code = ""
             provider_name = "Banca"
             if customer_id:
                 conns = list_connections_for_customer(customer_id)
                 for c in conns:
-                    if str(c.get("id")) == str(connection_id):
+                    cid = c.get("id") or c.get("connection_id")
+                    if cid is not None and str(cid) == str(connection_id):
                         provider_code = c.get("provider_code", "") or ""
                         provider_name = c.get("provider_name", "") or "Banca"
                         break
 
             # Fetch accounts della connection
+            # V6: campo è "id" o "account_id" — fallback per safety
             accounts = list_user_accounts_for_connection(connection_id)
+            logging.info("Salt Edge callback: %d accounts ricevuti per connection %s",
+                         len(accounts), connection_id)
             saved = 0
             access_exp = datetime.utcnow() + timedelta(days=90)
             for acc in accounts:
-                ext_id = str(acc.get("id", ""))
+                ext_id = str(acc.get("id") or acc.get("account_id") or "")
                 if not ext_id:
+                    logging.warning("Salt Edge callback: account senza id, skipped. Keys=%s",
+                                    list(acc.keys()))
                     continue
                 if BankAccount.query.filter_by(
                     user_id=current_user.id, external_account_id=ext_id

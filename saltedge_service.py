@@ -322,8 +322,8 @@ def _parse_date(s: str | None):
 
 
 def upsert_transaction(db, bank_account, tx_data: dict):
-    """Inserisce una transazione Salt Edge. Schema:
-    - id (str)
+    """Inserisce una transazione Salt Edge. Schema V6:
+    - id / transaction_id (str)
     - account_id (str)
     - amount (float)
     - currency_code (str)
@@ -333,7 +333,7 @@ def upsert_transaction(db, bank_account, tx_data: dict):
     - status: posted / pending
     """
     from models import BankTransaction
-    ext_id = str(tx_data.get("id", ""))[:120]
+    ext_id = str(tx_data.get("id") or tx_data.get("transaction_id") or "")[:120]
     if not ext_id:
         return None
     existing = BankTransaction.query.filter_by(
@@ -383,7 +383,8 @@ def sync_account(db, bank_account, days_back: int = 30) -> dict:
         try:
             accs = list_user_accounts_for_connection(connection_id)
             for acc in accs:
-                if str(acc.get("id")) == str(bank_account.external_account_id):
+                acc_id = acc.get("id") or acc.get("account_id")
+                if acc_id is not None and str(acc_id) == str(bank_account.external_account_id):
                     bal = acc.get("balance")
                     if bal is not None:
                         try:
