@@ -13,8 +13,9 @@
 </h2>
 <p class="text-muted mb-4">
   Compila i campi e GestFatture genera l'XML conforme allo standard FatturaPA 1.2.x.
-  Per ora puoi <strong>scaricare l'XML</strong> e inviarlo manualmente via PEC al SDI;
-  l'invio automatico via Aruba arriverà a breve.
+  Puoi <strong>scaricare l'XML</strong> per inviarlo manualmente via PEC al SDI,
+  oppure usare il pulsante <strong>Invia a SDI via Aruba</strong> dalla pagina di dettaglio
+  (richiede Aruba SDI attivo nelle Impostazioni).
 </p>
 
 <div class="row">
@@ -27,20 +28,39 @@
           <!-- Cliente -->
           <div class="mb-3">
             <label class="form-label fw-semibold">Cliente *</label>
-            <select name="client_id" class="form-select" required>
+            <select name="client_id" id="client-select" class="form-select" required>
               <option value="">— Seleziona cliente —</option>
               {% for c in clients %}
+                {% set missing_list = [] %}
+                {% if not c.address %}{% set _ = missing_list.append('indirizzo') %}{% endif %}
+                {% if not c.city %}{% set _ = missing_list.append('comune') %}{% endif %}
+                {% if not c.cap %}{% set _ = missing_list.append('CAP') %}{% endif %}
+                {% if not c.provincia %}{% set _ = missing_list.append('provincia') %}{% endif %}
+                {% if (not c.codice_destinatario or c.codice_destinatario|length != 7) and not c.pec %}
+                  {% set _ = missing_list.append('codice destinatario o PEC') %}
+                {% endif %}
                 <option value="{{ c.id }}"
-                        {% if not c.codice_destinatario and not c.pec %}disabled{% endif %}>
+                        data-missing="{{ '1' if missing_list else '0' }}"
+                        data-missing-fields="{{ missing_list|join(', ') }}"
+                        data-edit-url="{{ url_for('edit_client', cid=c.id) }}"
+                        data-name="{{ c.name }}">
                   {{ c.name }}
                   {% if c.vat_number %}(P.IVA {{ c.vat_number }}){% endif %}
-                  {% if not c.codice_destinatario and not c.pec %} ⚠ dati FatturaPA mancanti{% endif %}
+                  {% if missing_list %} ⚠ dati FatturaPA mancanti{% endif %}
                 </option>
               {% endfor %}
             </select>
             <div class="form-text">
-              Solo i clienti con codice destinatario SDI o PEC sono selezionabili.
+              I clienti con ⚠ hanno dati FatturaPA incompleti — selezionali per vedere quali campi mancano e completarli.
               <a href="{{ url_for('new_client') }}">+ Nuovo cliente</a>
+            </div>
+            <div id="client-missing-alert" class="alert alert-warning mt-2 mb-0 d-none small">
+              <i class="bi bi-exclamation-triangle me-1"></i>
+              <strong id="client-missing-name"></strong>:
+              campi mancanti per FatturaPA → <span id="client-missing-fields"></span>.
+              <a id="client-missing-link" href="#" class="alert-link fw-semibold">
+                Completa i dati del cliente <i class="bi bi-arrow-right"></i>
+              </a>
             </div>
           </div>
 
@@ -101,7 +121,7 @@
 
           <hr class="my-4">
 
-          <button type="submit" class="btn btn-primary btn-lg">
+          <button type="submit" id="submit-emit" class="btn btn-primary btn-lg">
             <i class="bi bi-file-earmark-check me-1"></i> Emetti fattura e genera XML
           </button>
           <a href="{{ url_for('invoices') }}" class="btn btn-outline-secondary">Annulla</a>
@@ -118,10 +138,10 @@
         </h6>
         <ol class="small mb-0">
           <li>GestFatture genera l'XML FatturaPA conforme</li>
-          <li>L'XML viene salvato e puoi scaricarlo dalla pagina di dettaglio fattura</li>
-          <li>Per ora invia tu l'XML via <strong>PEC al SDI</strong>:
-              <code>sdi01@pec.fatturapa.it</code></li>
-          <li>Quando avremo l'integrazione Aruba, l'invio sarà automatico</li>
+          <li>L'XML viene salvato e puoi scaricarlo dalla pagina di dettaglio</li>
+          <li>Dalla pagina di dettaglio: <strong>"Invia a SDI via Aruba"</strong> se Aruba SDI è attivo,
+              oppure scarica e invia tu via PEC <code>sdi01@pec.fatturapa.it</code></li>
+          <li>Lo stato (consegnata/scartata) si aggiorna in automatico ogni 30 min via polling</li>
           <li>La fattura entra nel ciclo solleciti se non viene pagata</li>
         </ol>
       </div>
@@ -149,6 +169,27 @@ function updateTotale() {
   const tot = imp * (1 + iva / 100);
   document.getElementById('totale_preview').value = '€ ' + tot.toFixed(2).replace('.', ',');
 }
+
+function updateClientMissing() {
+  const sel = document.getElementById('client-select');
+  const opt = sel.options[sel.selectedIndex];
+  const alertEl = document.getElementById('client-missing-alert');
+  const nameEl = document.getElementById('client-missing-name');
+  const fieldsEl = document.getElementById('client-missing-fields');
+  const linkEl = document.getElementById('client-missing-link');
+  const submitBtn = document.getElementById('submit-emit');
+  if (opt && opt.value && opt.dataset.missing === '1') {
+    nameEl.textContent = opt.dataset.name;
+    fieldsEl.textContent = opt.dataset.missingFields;
+    linkEl.href = opt.dataset.editUrl;
+    alertEl.classList.remove('d-none');
+    submitBtn.disabled = true;
+  } else {
+    alertEl.classList.add('d-none');
+    submitBtn.disabled = false;
+  }
+}
+document.getElementById('client-select').addEventListener('change', updateClientMissing);
 </script>
 
 {% endblock %}
