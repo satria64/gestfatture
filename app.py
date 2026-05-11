@@ -537,6 +537,7 @@ def create_app():
             quantita=1.0,
             prezzo_unitario=imponibile,
             aliquota_iva=invoice.iva_rate or 22.0,
+            natura=(invoice.natura_iva or "").strip(),
         )
         prog_int = invoice.progressivo or 1
         f = Fattura(
@@ -588,9 +589,16 @@ def create_app():
                 description = request.form.get("description", "").strip() or "Prestazione di servizi"
                 issue_date = datetime.strptime(request.form.get("issue_date", ""), "%Y-%m-%d").date()
                 due_date = datetime.strptime(request.form.get("due_date", ""), "%Y-%m-%d").date()
+                natura_iva = (request.form.get("natura_iva", "") or "").strip().upper()
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
+            # Validazione coerenza Natura ↔ aliquota IVA
+            if iva_rate == 0 and not natura_iva:
+                flash("⚠️ Con IVA 0% devi indicare la Natura (es. N2.2 forfettario).", "warning")
+                return redirect(url_for("new_outgoing_invoice"))
+            if iva_rate > 0 and natura_iva:
+                natura_iva = ""  # ignora silenziosamente: Natura solo con IVA 0
 
             client = Client.query.filter_by(id=client_id, user_id=uid).first()
             if not client:
@@ -630,6 +638,7 @@ def create_app():
                 progressivo=prog,
                 notes=description,
                 sdi_status="draft",
+                natura_iva=natura_iva,
             )
             db.session.add(inv); db.session.commit()
 
@@ -4474,6 +4483,10 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN aruba_filename TEXT DEFAULT ''"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.aruba_filename")
+        if "natura_iva" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN natura_iva TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.natura_iva")
 
         # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
         if "clients" in inspector.get_table_names():

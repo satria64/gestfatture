@@ -264,6 +264,10 @@ class Invoice(db.Model):
     # Filename restituito da Aruba (es. IT01879020517_xxxxx.xml.p7m). Usato per
     # interrogare l'endpoint /api/v2/invoices-out/detail durante il polling stato.
     aruba_filename     = db.Column(db.String(200), default="")
+    # ─── Edge cases FatturaPA (Fase 3) ───────────────────────────────────────
+    # Natura IVA: obbligatoria quando iva_rate=0. Valori AdE: N1 / N2.1 / N2.2 /
+    # N3.1-N3.6 / N4 / N5 / N6.1-N6.9 / N7. Es: N2.2 per regime forfettario.
+    natura_iva         = db.Column(db.String(10), default="")
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")

@@ -104,18 +104,53 @@
             </div>
             <div class="col-sm-3">
               <label class="form-label fw-semibold">Aliquota IVA (%) *</label>
-              <select name="iva_rate" class="form-select" onchange="updateTotale()">
+              <select name="iva_rate" id="iva-rate-select" class="form-select"
+                      onchange="updateTotale(); updateNaturaVisibility();">
                 <option value="22" selected>22% (ord.)</option>
                 <option value="10">10%</option>
                 <option value="5">5%</option>
                 <option value="4">4%</option>
-                <option value="0">0% (esente)</option>
+                <option value="0">0% (esente/non sogg./inversione)</option>
               </select>
             </div>
             <div class="col-sm-3">
               <label class="form-label fw-semibold">Totale</label>
               <input type="text" id="totale_preview" class="form-control fw-bold" readonly value="€ 0,00">
               <div class="form-text">IVA inclusa.</div>
+            </div>
+          </div>
+
+          <!-- Natura IVA: visibile solo quando aliquota = 0 -->
+          <div id="natura-iva-row" class="mb-3 d-none">
+            <label class="form-label fw-semibold">Natura IVA *</label>
+            <select name="natura_iva" id="natura-iva-select" class="form-select">
+              <option value="">— Seleziona Natura —</option>
+              <option value="N1">N1 — escluse ex art. 15 DPR 633/72</option>
+              <option value="N2.1">N2.1 — non soggette ad IVA (artt. 7-7septies)</option>
+              <option value="N2.2">N2.2 — non soggette — altri casi (regime forfettario)</option>
+              <option value="N3.1">N3.1 — non imponibili: esportazioni</option>
+              <option value="N3.2">N3.2 — non imponibili: cessioni intracomunitarie</option>
+              <option value="N3.3">N3.3 — non imponibili: cessioni verso San Marino</option>
+              <option value="N3.4">N3.4 — non imponibili: operazioni assimilate alle export</option>
+              <option value="N3.5">N3.5 — non imponibili: a seguito di dichiarazioni d'intento</option>
+              <option value="N3.6">N3.6 — non imponibili: altre operazioni che non concorrono al volume</option>
+              <option value="N4">N4 — esenti (art. 10 DPR 633/72)</option>
+              <option value="N5">N5 — regime del margine / IVA non esposta</option>
+              <option value="N6.1">N6.1 — inversione contabile: rottami / cessioni metalli ferrosi</option>
+              <option value="N6.2">N6.2 — inversione contabile: cessioni oro e argento puro</option>
+              <option value="N6.3">N6.3 — inversione contabile: subappalto edilizia</option>
+              <option value="N6.4">N6.4 — inversione contabile: cessioni di fabbricati</option>
+              <option value="N6.5">N6.5 — inversione contabile: cessioni di telefoni cellulari</option>
+              <option value="N6.6">N6.6 — inversione contabile: cessioni prodotti elettronici</option>
+              <option value="N6.7">N6.7 — inversione contabile: prestazioni comparto edile e settori connessi</option>
+              <option value="N6.8">N6.8 — inversione contabile: operazioni settore energetico</option>
+              <option value="N6.9">N6.9 — inversione contabile: altri casi</option>
+              <option value="N7">N7 — IVA assolta in altro stato UE</option>
+            </select>
+            <div class="form-text">
+              Obbligatoria con IVA 0%. <strong>Regime forfettario</strong> → N2.2.
+              <strong>Esportazioni</strong> → N3.1. <strong>Esenti</strong> (art. 10) → N4.
+              <a href="https://www.agenziaentrate.gov.it/portale/web/guest/cittadini/agevolazioni/regime-forfetario" target="_blank">Guida AdE</a>
             </div>
           </div>
 
@@ -190,6 +225,22 @@ function updateClientMissing() {
   }
 }
 document.getElementById('client-select').addEventListener('change', updateClientMissing);
+
+function updateNaturaVisibility() {
+  const iva = parseFloat(document.getElementById('iva-rate-select').value) || 0;
+  const row = document.getElementById('natura-iva-row');
+  const sel = document.getElementById('natura-iva-select');
+  if (iva === 0) {
+    row.classList.remove('d-none');
+    sel.required = true;
+  } else {
+    row.classList.add('d-none');
+    sel.required = false;
+    sel.value = '';  // reset per evitare di mandare un valore obsoleto
+  }
+}
+// Init: imposta lo stato giusto al caricamento
+updateNaturaVisibility();
 </script>
 
 {% endblock %}

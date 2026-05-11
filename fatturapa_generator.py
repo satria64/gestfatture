@@ -73,6 +73,10 @@ class Riga:
     prezzo_unitario: float = 0.0      # in euro, 2 decimali
     aliquota_iva: float = 22.0        # in %, es. 22.0
     unita_misura: str = ""            # opzionale, es. "ore", "pz"
+    # Natura IVA (obbligatoria se aliquota_iva == 0): N1, N2.1, N2.2, N3.1-N3.6,
+    # N4, N5, N6.1-N6.9, N7. Codifica AdE per esenzioni / non imponibili /
+    # inversioni contabili. Lasciare vuoto se aliquota > 0.
+    natura: str = ""
 
     @property
     def prezzo_totale(self) -> float:
@@ -159,6 +163,11 @@ def _validate(fattura: Fattura) -> list[str]:
             errors.append(f"Riga {i}: quantità deve essere > 0.")
         if r.prezzo_unitario < 0:
             errors.append(f"Riga {i}: prezzo unitario non può essere negativo.")
+        if r.aliquota_iva == 0 and not r.natura:
+            errors.append(f"Riga {i}: con IVA 0% la Natura è obbligatoria "
+                          "(es. N2.2 forfettario, N4 esente).")
+        if r.aliquota_iva > 0 and r.natura:
+            errors.append(f"Riga {i}: Natura va valorizzata solo se IVA = 0%.")
 
     if not fattura.numero:
         errors.append("Numero fattura obbligatorio.")
@@ -254,17 +263,25 @@ def _build_dati_beni_servizi(parent: ET.Element, f: Fattura):
         _add(dl, "PrezzoUnitario",  _fmt_amount(r.prezzo_unitario))
         _add(dl, "PrezzoTotale",    _fmt_amount(r.prezzo_totale))
         _add(dl, "AliquotaIVA",     _fmt_amount(r.aliquota_iva))
+        # XSD: <Natura> obbligatoria quando AliquotaIVA = 0
+        if r.aliquota_iva == 0 and r.natura:
+            _add(dl, "Natura", r.natura)
 
-    # Riepilogo: aggrega righe per aliquota IVA
-    aliquote = {}  # {aliquota: imponibile}
+    # Riepilogo: aggrega righe per (aliquota IVA, Natura)
+    # Necessario aggregare anche per Natura perché righe a 0% con nature
+    # diverse devono produrre DatiRiepilogo separati.
+    aliquote = {}  # {(aliquota, natura): imponibile}
     for r in f.righe:
-        aliquote.setdefault(r.aliquota_iva, 0.0)
-        aliquote[r.aliquota_iva] += r.prezzo_totale
-    for aliquota, imponibile in sorted(aliquote.items()):
+        key = (r.aliquota_iva, r.natura if r.aliquota_iva == 0 else "")
+        aliquote.setdefault(key, 0.0)
+        aliquote[key] += r.prezzo_totale
+    for (aliquota, natura), imponibile in sorted(aliquote.items()):
         imponibile = round(imponibile, 2)
         imposta = round(imponibile * aliquota / 100.0, 2)
         dr = ET.SubElement(dbs, "DatiRiepilogo")
         _add(dr, "AliquotaIVA",        _fmt_amount(aliquota))
+        if aliquota == 0 and natura:
+            _add(dr, "Natura", natura)
         _add(dr, "ImponibileImporto",  _fmt_amount(imponibile))
         _add(dr, "Imposta",            _fmt_amount(imposta))
         _add(dr, "EsigibilitaIVA",     "I")  # I = immediata
