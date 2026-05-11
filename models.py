@@ -284,6 +284,12 @@ class Invoice(db.Model):
 
     client    = db.relationship("Client", back_populates="invoices")
     reminders = db.relationship("Reminder", back_populates="invoice", cascade="all, delete-orphan")
+    # Righe multiple di dettaglio (Fase 3 Blocco B). Per fatture is_outgoing=True
+    # è la fonte di verità degli importi. Le fatture passive importate possono
+    # non avere righe (resta solo invoice.amount/imponibile aggregato).
+    lines     = db.relationship("InvoiceLine", back_populates="invoice",
+                                cascade="all, delete-orphan",
+                                order_by="InvoiceLine.numero_linea")
 
     # Auto-relazione: questa NC riferisce a quale fattura?
     linked_invoice  = db.relationship(
@@ -342,6 +348,36 @@ class Invoice(db.Model):
             return
         if date.today() > self.due_date:
             self.status = "overdue"
+
+
+class InvoiceLine(db.Model):
+    """Riga di dettaglio di una fattura emessa (Fase 3 Blocco B).
+
+    Rappresenta una singola linea della FatturaPA <DettaglioLinee>. Permette
+    fatture con N righe di descrizione + quantità + prezzo + IVA + (opz) natura.
+    Il campo `natura` sostituisce, per le fatture multi-riga, il vecchio
+    `Invoice.natura_iva` (che resta popolato con la natura della prima riga
+    per backward compat / display sintetico).
+    """
+    __tablename__ = "invoice_lines"
+
+    id              = db.Column(db.Integer, primary_key=True)
+    invoice_id      = db.Column(db.Integer, db.ForeignKey("invoices.id"),
+                                nullable=False, index=True)
+    numero_linea    = db.Column(db.Integer, nullable=False, default=1)
+    descrizione     = db.Column(db.Text, nullable=False, default="")
+    quantita        = db.Column(db.Float, nullable=False, default=1.0)
+    unita_misura    = db.Column(db.String(20), default="")
+    prezzo_unitario = db.Column(db.Float, nullable=False, default=0.0)
+    aliquota_iva    = db.Column(db.Float, nullable=False, default=22.0)
+    natura          = db.Column(db.String(10), default="")  # N1-N7 se aliquota=0
+    created_at      = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship("Invoice", back_populates="lines")
+
+    @property
+    def prezzo_totale(self) -> float:
+        return round(self.quantita * self.prezzo_unitario, 2)
 
 
 class Reminder(db.Model):

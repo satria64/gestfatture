@@ -530,20 +530,36 @@ def create_app():
             codice_destinatario=(c.codice_destinatario or "0000000").upper().zfill(7),
             pec_destinatario=c.pec or "",
         )
-        # Riga unica (MVP): usa amount come imponibile
-        imponibile = invoice.imponibile if invoice.imponibile else invoice.amount
-        riga = Riga(
-            descrizione=(invoice.notes[:200] if invoice.notes else "Prestazione di servizi"),
-            quantita=1.0,
-            prezzo_unitario=imponibile,
-            aliquota_iva=invoice.iva_rate or 22.0,
-            natura=(invoice.natura_iva or "").strip(),
-        )
+        # Righe di dettaglio: prende da invoice.lines (Fase 3 Blocco B).
+        # Fallback per fatture legacy senza righe (non dovrebbe più succedere
+        # grazie al backfill in _migrate_db): ricostruisce 1 riga dagli importi
+        # aggregati dell'Invoice.
+        if invoice.lines:
+            righe = [
+                Riga(
+                    descrizione=line.descrizione or "Prestazione di servizi",
+                    quantita=line.quantita or 1.0,
+                    prezzo_unitario=line.prezzo_unitario or 0.0,
+                    aliquota_iva=line.aliquota_iva if line.aliquota_iva is not None else 22.0,
+                    unita_misura=line.unita_misura or "",
+                    natura=(line.natura or "").strip(),
+                )
+                for line in invoice.lines
+            ]
+        else:
+            imponibile = invoice.imponibile if invoice.imponibile else invoice.amount
+            righe = [Riga(
+                descrizione=(invoice.notes[:200] if invoice.notes else "Prestazione di servizi"),
+                quantita=1.0,
+                prezzo_unitario=imponibile,
+                aliquota_iva=invoice.iva_rate or 22.0,
+                natura=(invoice.natura_iva or "").strip(),
+            )]
         prog_int = invoice.progressivo or 1
         f = Fattura(
             numero=invoice.number,
             data=invoice.issue_date,
-            cedente=ced, cessionario=ces, righe=[riga],
+            cedente=ced, cessionario=ces, righe=righe,
             tipo_documento=invoice.document_type or "TD01",
             progressivo_invio=encode_progressivo(prog_int),
             data_scadenza=invoice.due_date,
@@ -4627,6 +4643,35 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_causale TEXT DEFAULT ''"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.ritenuta_causale")
+
+        # ── Tabella invoice_lines (righe multiple, Fase 3 Blocco B) ──────────
+        # db.create_all() già crea la tabella se assente. Qui facciamo backfill:
+        # per ogni Invoice outgoing senza righe (legacy single-riga), inseriamo
+        # 1 InvoiceLine ricostruita dai campi aggregati dell'Invoice.
+        if "invoice_lines" in inspector.get_table_names():
+            result = conn.execute(text("""
+                SELECT i.id, i.notes, i.imponibile, i.amount, i.iva_rate, i.natura_iva
+                FROM invoices i
+                LEFT JOIN invoice_lines il ON il.invoice_id = i.id
+                WHERE i.is_outgoing = 1 AND il.id IS NULL
+            """))
+            rows = result.fetchall()
+            for row in rows:
+                inv_id, notes, imponibile, amount, iva_rate, natura_iva = row
+                prezzo = imponibile if imponibile else (amount or 0)
+                descrizione = ((notes or "Prestazione di servizi")[:1000])
+                conn.execute(text("""
+                    INSERT INTO invoice_lines
+                    (invoice_id, numero_linea, descrizione, quantita,
+                     prezzo_unitario, aliquota_iva, natura, created_at)
+                    VALUES (:iid, 1, :desc, 1.0, :prezzo, :iva, :natura,
+                            CURRENT_TIMESTAMP)
+                """), {"iid": inv_id, "desc": descrizione, "prezzo": prezzo,
+                       "iva": iva_rate or 22.0, "natura": natura_iva or ""})
+            if rows:
+                conn.commit()
+                logging.info("Migrazione: backfill %d invoice_lines per "
+                             "fatture outgoing legacy", len(rows))
 
         # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
         if "clients" in inspector.get_table_names():
