@@ -233,17 +233,17 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
   - **Lato passivo** (uscite, KPI count + lista prossimi pagamenti)
 - [x] Sidebar: nuove voci "Fornitori" e "Pagamenti"
 
-### Riconciliazione bancaria (Tink, PSD2)
-- [x] Provider: **Tink** (Visa) — copre tutte le banche italiane. GoCardless temporaneamente disabilitato per nuove signup.
-- [x] Connessione via Tink Link (redirect → scegli banca → SCA → callback con code → exchange per access_token + refresh_token)
-- [x] Sync giornaliero transazioni alle 07:00 (incrementale, ultimi 14gg)
-- [x] Auto-refresh dell'access_token quando scaduto (refresh_token valido 90gg)
+### Riconciliazione bancaria (Salt Edge V6 AIS, PSD2)
+- [x] Provider: **Salt Edge V6** (AIS) — switch da Tink (€500-1000/mese troppo) a Salt Edge. Pending mode (fake banks) operativo end-to-end al 2026-05-11. Per banche italiane reali serve **Salt Edge Partner Program** (in trattativa, budget target €500/mese).
+- [x] Connessione via Salt Edge Connect Widget V6 (redirect → scegli banca → SCA → callback). **Recovery via `GET /connections?customer_id=X`** se i query params sono vuoti — V6 non sempre accoda `connection_id` al return_to dopo "Torna alla tua applicazione" (commit `298fcf7`)
+- [x] Sync giornaliero transazioni alle 07:00 (incrementale, `last_sync_at - 2gg` di overlap)
 - [x] Auto-match transazione → fattura (importo + numero fattura/P.IVA/nome cliente nella causale, score 0-100)
 - [x] Riconciliazione automatica se score≥80 e candidato unico → fattura marcata pagata + payment_ref `bank:<tx_id>`
 - [x] Coda manuale `/bank/reconciliation` con UI per match dubbi (top 5 candidati per ogni tx + opzione "forza match")
 - [x] Notifica email + WhatsApp digest dopo sync (auto-matched + pending count)
 - [x] Re-auth ogni 90gg (limite PSD2, alert 14gg prima della scadenza)
-- [x] tink_client_id + tink_client_secret in admin settings cifrati at-rest
+- [x] `saltedge_app_id` + `saltedge_app_secret` in admin settings cifrati at-rest
+- [x] Logging diagnostico gated `BANK_VERBOSE=1` env var (dormiente di default) in `bank_callback` per debug futuri (commit `10d7c92`)
 
 ### Nice to have
 - [x] **Dashboard admin con metriche di sistema** (utenti, fatture, attività, errori) → `/admin/metrics`
@@ -354,7 +354,7 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-05 (signup pubblico self-service + Stripe Subscriptions + Customer Portal + middleware enforcer trial)*
+*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending mode operativo end-to-end, Stripe LIVE approvato, in trattativa Partner Program Salt Edge per banche italiane vere)*
 
 ---
 
