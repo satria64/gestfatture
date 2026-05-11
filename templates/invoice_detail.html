@@ -200,6 +200,18 @@
             <i class="bi bi-hourglass-split me-1"></i> Stato in aggiornamento automatico (polling ogni 30 min)
           </span>
           {% endif %}
+
+          {% if inv.document_type in ('TD01', 'TD05', 'TD06')
+             and inv.status not in ('compensated', 'cancelled') %}
+          <form method="post" action="{{ url_for('create_credit_note', iid=inv.id) }}" class="d-inline"
+                onsubmit="return confirm('Creare una Nota di Credito (TD04) che storna totalmente la fattura {{ inv.number }}? La fattura origine verrà marcata come compensata.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-danger btn-sm" type="submit"
+                    title="Crea TD04 di storno totale">
+              <i class="bi bi-file-earmark-minus me-1"></i> Crea Nota di Credito
+            </button>
+          </form>
+          {% endif %}
         </div>
 
         {% if aruba_enabled %}

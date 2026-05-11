@@ -117,6 +117,10 @@ class Fattura:
     ritenuta_aliquota: float = 0.0   # % es. 20.0
     ritenuta_importo: float = 0.0    # in euro
     ritenuta_causale: str = ""       # codice causale: A, M, W, M1, ecc.
+    # Riferimento alla fattura originale (obbligatorio per TD04 Nota Credito,
+    # TD05 Nota Debito; emette <DatiFattureCollegate>).
+    riferimento_fattura_numero: str = ""    # es. "1/2026"
+    riferimento_fattura_data: date | None = None
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -284,6 +288,14 @@ def _build_dati_generali(parent: ET.Element, f: Fattura, totale: float):
             _add(dcp, "Ritenuta", "SI")
     if f.causale:
         _add(dgd, "Causale", f.causale[:200])
+
+    # DatiFattureCollegate (riferimento a fattura origine) — dentro DatiGenerali
+    # ma FUORI DatiGeneraliDocumento. Obbligatorio per TD04 NC, TD05 ND, ecc.
+    if f.riferimento_fattura_numero:
+        dfc = ET.SubElement(dg, "DatiFattureCollegate")
+        _add(dfc, "IdDocumento", f.riferimento_fattura_numero)
+        if f.riferimento_fattura_data:
+            _add(dfc, "Data", _fmt_date(f.riferimento_fattura_data))
 
 
 def _build_dati_beni_servizi(parent: ET.Element, f: Fattura):

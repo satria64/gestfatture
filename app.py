@@ -556,6 +556,10 @@ def create_app():
             ritenuta_aliquota=invoice.ritenuta_aliquota or 0.0,
             ritenuta_importo=invoice.ritenuta_importo or 0.0,
             ritenuta_causale=(invoice.ritenuta_causale or "").strip(),
+            riferimento_fattura_numero=(invoice.linked_invoice.number
+                                        if invoice.linked_invoice else ""),
+            riferimento_fattura_data=(invoice.linked_invoice.issue_date
+                                      if invoice.linked_invoice else None),
         )
         xml_str = generate_xml(f)
         filename = make_filename(ced.piva, encode_progressivo(prog_int))
@@ -734,6 +738,75 @@ def create_app():
         except Exception as e:
             flash(f"❌ Errore rigenerazione: {e}", "danger")
         return redirect(url_for("invoice_detail", iid=iid))
+
+    @app.route("/invoices/<int:iid>/create-nc", methods=["POST"])
+    @login_required
+    @limiter.limit("20 per hour")
+    def create_credit_note(iid):
+        """Crea una Nota di Credito (TD04) per stornare totalmente una fattura
+        emessa. Crea una nuova Invoice con document_type='TD04',
+        linked_invoice_id=iid, importi copiati dalla fattura origine. Genera
+        subito l'XML 'neutro' (download); per inviarla al SDI usa il pulsante
+        'Invia a SDI via Aruba' dalla pagina di dettaglio della NC."""
+        from fatturapa_generator import encode_progressivo
+        origin = get_my_invoice(iid)
+        if not origin.is_outgoing:
+            flash("Puoi creare NC solo da fatture emesse da te.", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        if origin.document_type == "TD04":
+            flash("Non puoi creare una NC di una NC.", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        # Cerca se già esiste una NC collegata (evita duplicati)
+        existing_nc = Invoice.query.filter_by(
+            user_id=current_user.id, linked_invoice_id=origin.id,
+            document_type="TD04"
+        ).first()
+        if existing_nc:
+            flash(f"⚠️ Esiste già la NC {existing_nc.number} per questa fattura.",
+                  "warning")
+            return redirect(url_for("invoice_detail", iid=existing_nc.id))
+        # Numerazione progressiva annuale (separata? per ora condivisa con fatture)
+        year = date.today().year
+        prog = _next_progressivo(current_user.id, year)
+        nc_number = f"{prog}/{year}"
+        nc = Invoice(
+            user_id=current_user.id, client_id=origin.client_id,
+            number=nc_number, amount=origin.amount,
+            imponibile=origin.imponibile, iva_rate=origin.iva_rate,
+            iva_amount=origin.iva_amount,
+            issue_date=date.today(),
+            due_date=date.today(),
+            document_type="TD04", status="cancelled",
+            is_outgoing=True, is_passive=False,
+            progressivo=prog,
+            notes=f"Storno totale fattura {origin.number} del "
+                  f"{origin.issue_date.strftime('%d/%m/%Y')}",
+            sdi_status="draft",
+            linked_invoice_id=origin.id,
+            natura_iva=origin.natura_iva or "",
+            cassa_tipologia=origin.cassa_tipologia or "",
+            cassa_aliquota=origin.cassa_aliquota or 0.0,
+            cassa_importo=origin.cassa_importo or 0.0,
+            ritenuta_tipologia=origin.ritenuta_tipologia or "",
+            ritenuta_aliquota=origin.ritenuta_aliquota or 0.0,
+            ritenuta_importo=origin.ritenuta_importo or 0.0,
+            ritenuta_causale=origin.ritenuta_causale or "",
+        )
+        db.session.add(nc); db.session.commit()
+        # Marca anche la fattura origine come compensata
+        origin.status = "compensated"
+        db.session.commit()
+        try:
+            _build_outgoing_xml(nc)
+            audit("credit_note_created",
+                  target=f"invoice:{nc.number}",
+                  details=f"storna:{origin.number}")
+            flash(f"✅ Nota di Credito {nc.number} creata (storno totale di "
+                  f"{origin.number}). XML pronto per il download.", "success")
+        except Exception as e:
+            logging.exception("Errore generazione XML NC")
+            flash(f"⚠️ NC creata ma errore XML: {e}", "warning")
+        return redirect(url_for("invoice_detail", iid=nc.id))
 
     @app.route("/invoices/<int:iid>/send-sdi", methods=["POST"])
     @login_required
