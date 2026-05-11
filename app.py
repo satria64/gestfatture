@@ -1426,6 +1426,8 @@ def create_app():
         # Aiuta a debuggare schema callback nelle versioni V6 future.
         logging.info("Salt Edge callback args: %s",
                      {k: v[:100] for k, v in request.args.items()})
+        if os.getenv("BANK_VERBOSE") == "1":
+            logging.warning("[BANK_VERBOSE] args full: %s", dict(request.args))
         connection_id = request.args.get("connection_id", "").strip()
         customer_id   = request.args.get("customer_id", "").strip()
         # Salt Edge a volte rimanda "None"/"null" letterali se il widget abortisce
@@ -1469,6 +1471,9 @@ def create_app():
             provider_name = "Banca"
             if customer_id:
                 conns = list_connections_for_customer(customer_id)
+                if os.getenv("BANK_VERBOSE") == "1":
+                    logging.warning("[BANK_VERBOSE] connections: count=%d, keys[0]=%s",
+                                    len(conns), list(conns[0].keys()) if conns else [])
                 for c in conns:
                     cid = c.get("id") or c.get("connection_id")
                     if cid is not None and str(cid) == str(connection_id):
@@ -1481,6 +1486,10 @@ def create_app():
             accounts = list_user_accounts_for_connection(connection_id)
             logging.info("Salt Edge callback: %d accounts ricevuti per connection %s",
                          len(accounts), connection_id)
+            if os.getenv("BANK_VERBOSE") == "1" and accounts:
+                _a0 = accounts[0]
+                logging.warning("[BANK_VERBOSE] account[0] keys=%s id=%r account_id=%r",
+                                list(_a0.keys()), _a0.get("id"), _a0.get("account_id"))
             saved = 0
             access_exp = datetime.utcnow() + timedelta(days=90)
             for acc in accounts:
@@ -1524,6 +1533,9 @@ def create_app():
                   "success")
         except Exception as e:
             logging.exception("Errore Salt Edge callback")
+            if os.getenv("BANK_VERBOSE") == "1":
+                logging.warning("[BANK_VERBOSE] callback exception, args=%s",
+                                dict(request.args))
             audit("bank_connect_failed", details=str(e)[:200])
             flash(f"❌ Errore: {e}", "danger")
         return redirect(url_for("bank_overview"))
