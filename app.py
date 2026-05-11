@@ -868,6 +868,34 @@ def create_app():
             ritenuta_causale=origin.ritenuta_causale or "",
         )
         db.session.add(nc); db.session.commit()
+        # Copia le righe di dettaglio dalla fattura origine (Fase 3 Blocco B).
+        # Se l'origine ha righe le replico identiche; se è una fattura legacy
+        # senza righe (raro post-migration), fallback su singola riga sintetica.
+        from models import InvoiceLine
+        if origin.lines:
+            for idx, ln in enumerate(origin.lines, start=1):
+                db.session.add(InvoiceLine(
+                    invoice_id=nc.id,
+                    numero_linea=idx,
+                    descrizione=ln.descrizione,
+                    quantita=ln.quantita,
+                    unita_misura=ln.unita_misura or "",
+                    prezzo_unitario=ln.prezzo_unitario,
+                    aliquota_iva=ln.aliquota_iva,
+                    natura=ln.natura or "",
+                ))
+        else:
+            db.session.add(InvoiceLine(
+                invoice_id=nc.id,
+                numero_linea=1,
+                descrizione=(origin.notes or f"Storno fattura {origin.number}")[:1000],
+                quantita=1.0,
+                prezzo_unitario=origin.imponibile or origin.amount or 0.0,
+                aliquota_iva=origin.iva_rate or 22.0,
+                natura=origin.natura_iva or "",
+            ))
+        db.session.commit()
+        db.session.refresh(nc)
         # Marca anche la fattura origine come compensata
         origin.status = "compensated"
         db.session.commit()
