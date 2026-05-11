@@ -98,46 +98,109 @@
             </div>
           </div>
 
-          <!-- Descrizione -->
+          <!-- Righe dettaglio (Fase 3 Blocco B) -->
           <div class="mb-3">
-            <label class="form-label fw-semibold">Descrizione prestazione *</label>
-            <textarea name="description" class="form-control" rows="3" maxlength="1000" required
-                      placeholder="Es: Consulenza tecnica per progetto X, periodo aprile-maggio 2026"></textarea>
+            <label class="form-label fw-semibold d-flex justify-content-between align-items-center">
+              <span>Righe dettaglio *</span>
+              <button type="button" class="btn btn-sm btn-outline-primary" onclick="addLine()">
+                <i class="bi bi-plus-lg me-1"></i> Aggiungi riga
+              </button>
+            </label>
+            <div class="table-responsive">
+              <table class="table table-sm align-middle mb-0" id="lines-table">
+                <thead class="table-light small">
+                  <tr>
+                    <th style="min-width:200px">Descrizione *</th>
+                    <th style="width:80px">Q.tà</th>
+                    <th style="width:80px">U.M.</th>
+                    <th style="width:110px">Prezzo unit. (€)</th>
+                    <th style="width:80px">IVA %</th>
+                    <th style="width:90px">Natura</th>
+                    <th style="width:110px" class="text-end">Totale riga</th>
+                    <th style="width:40px"></th>
+                  </tr>
+                </thead>
+                <tbody id="lines-tbody">
+                  <!-- Le righe vengono inserite dinamicamente -->
+                </tbody>
+              </table>
+            </div>
+            <input type="hidden" name="lines_json" id="lines-json">
             <div class="form-text">
-              MVP: descrizione unica per tutta la fattura. Le righe multiple arriveranno presto.
+              Almeno una riga obbligatoria. <strong>Natura</strong> si attiva solo
+              se IVA = 0% (forfettario N2.2, esportazioni N3.1, esenti art.10 N4,
+              reverse charge N6.x, ecc.).
             </div>
           </div>
 
-          <!-- Importi -->
-          <div class="row g-3 mb-3">
-            <div class="col-sm-6">
-              <label class="form-label fw-semibold">Imponibile (€) *</label>
-              <input type="number" name="imponibile" class="form-control" required
-                     step="0.01" min="0" placeholder="1000.00"
-                     oninput="updateTotale()">
-              <div class="form-text">Prezzo netto, IVA esclusa.</div>
-            </div>
-            <div class="col-sm-3">
-              <label class="form-label fw-semibold">Aliquota IVA (%) *</label>
-              <select name="iva_rate" id="iva-rate-select" class="form-select"
-                      onchange="updateTotale(); updateNaturaVisibility();">
-                <option value="22" selected>22% (ord.)</option>
-                <option value="10">10%</option>
-                <option value="5">5%</option>
-                <option value="4">4%</option>
-                <option value="0">0% (esente/non sogg./inversione)</option>
-              </select>
-            </div>
-            <div class="col-sm-3">
-              <label class="form-label fw-semibold">Totale documento</label>
-              <input type="text" id="totale_preview" class="form-control fw-bold" readonly value="€ 0,00">
-              <div class="form-text">
-                IVA inclusa. <span id="netto_incassare_text" class="text-success d-none">
-                  Netto da incassare: <strong id="netto_incassare_value">€ 0,00</strong>
-                </span>
-              </div>
-            </div>
-          </div>
+          <!-- Template HTML di una riga (clonato da JS) -->
+          <template id="line-template">
+            <tr class="line-row">
+              <td>
+                <textarea class="form-control form-control-sm line-descrizione"
+                          rows="2" maxlength="1000" required
+                          placeholder="Es: Consulenza maggio 2026"></textarea>
+              </td>
+              <td>
+                <input type="number" class="form-control form-control-sm line-quantita"
+                       value="1" step="0.01" min="0.01" required
+                       oninput="updateLineTotale(this); updateSummary();">
+              </td>
+              <td>
+                <input type="text" class="form-control form-control-sm line-um"
+                       maxlength="10" placeholder="es. ore, pz">
+              </td>
+              <td>
+                <input type="number" class="form-control form-control-sm line-prezzo"
+                       step="0.01" min="0" required placeholder="0.00"
+                       oninput="updateLineTotale(this); updateSummary();">
+              </td>
+              <td>
+                <select class="form-select form-select-sm line-iva" required
+                        onchange="updateLineTotale(this); updateLineNaturaVisibility(this); updateSummary();">
+                  <option value="22" selected>22%</option>
+                  <option value="10">10%</option>
+                  <option value="5">5%</option>
+                  <option value="4">4%</option>
+                  <option value="0">0%</option>
+                </select>
+              </td>
+              <td>
+                <select class="form-select form-select-sm line-natura d-none"
+                        onchange="updateSummary()">
+                  <option value="">—</option>
+                  <option value="N1">N1</option>
+                  <option value="N2.1">N2.1</option>
+                  <option value="N2.2">N2.2 (forfett.)</option>
+                  <option value="N3.1">N3.1 (export)</option>
+                  <option value="N3.2">N3.2 (intra-UE)</option>
+                  <option value="N3.3">N3.3</option>
+                  <option value="N3.4">N3.4</option>
+                  <option value="N3.5">N3.5</option>
+                  <option value="N3.6">N3.6</option>
+                  <option value="N4">N4 (esente)</option>
+                  <option value="N5">N5 (margine)</option>
+                  <option value="N6.1">N6.1</option>
+                  <option value="N6.2">N6.2</option>
+                  <option value="N6.3">N6.3</option>
+                  <option value="N6.4">N6.4</option>
+                  <option value="N6.5">N6.5</option>
+                  <option value="N6.6">N6.6</option>
+                  <option value="N6.7">N6.7</option>
+                  <option value="N6.8">N6.8</option>
+                  <option value="N6.9">N6.9</option>
+                  <option value="N7">N7</option>
+                </select>
+              </td>
+              <td class="text-end fw-semibold line-totale">€ 0,00</td>
+              <td class="text-center">
+                <button type="button" class="btn btn-sm btn-outline-danger"
+                        onclick="removeLine(this)" title="Rimuovi riga">
+                  <i class="bi bi-x-lg"></i>
+                </button>
+              </td>
+            </tr>
+          </template>
 
           <!-- Cassa previdenziale (opzionale) -->
           <div class="row g-3 mb-3">
@@ -252,37 +315,37 @@
             </div>
           </div>
 
-          <!-- Natura IVA: visibile solo quando aliquota = 0 -->
-          <div id="natura-iva-row" class="mb-3 d-none">
-            <label class="form-label fw-semibold">Natura IVA *</label>
-            <select name="natura_iva" id="natura-iva-select" class="form-select">
-              <option value="">— Seleziona Natura —</option>
-              <option value="N1">N1 — escluse ex art. 15 DPR 633/72</option>
-              <option value="N2.1">N2.1 — non soggette ad IVA (artt. 7-7septies)</option>
-              <option value="N2.2">N2.2 — non soggette — altri casi (regime forfettario)</option>
-              <option value="N3.1">N3.1 — non imponibili: esportazioni</option>
-              <option value="N3.2">N3.2 — non imponibili: cessioni intracomunitarie</option>
-              <option value="N3.3">N3.3 — non imponibili: cessioni verso San Marino</option>
-              <option value="N3.4">N3.4 — non imponibili: operazioni assimilate alle export</option>
-              <option value="N3.5">N3.5 — non imponibili: a seguito di dichiarazioni d'intento</option>
-              <option value="N3.6">N3.6 — non imponibili: altre operazioni che non concorrono al volume</option>
-              <option value="N4">N4 — esenti (art. 10 DPR 633/72)</option>
-              <option value="N5">N5 — regime del margine / IVA non esposta</option>
-              <option value="N6.1">N6.1 — inversione contabile: rottami / cessioni metalli ferrosi</option>
-              <option value="N6.2">N6.2 — inversione contabile: cessioni oro e argento puro</option>
-              <option value="N6.3">N6.3 — inversione contabile: subappalto edilizia</option>
-              <option value="N6.4">N6.4 — inversione contabile: cessioni di fabbricati</option>
-              <option value="N6.5">N6.5 — inversione contabile: cessioni di telefoni cellulari</option>
-              <option value="N6.6">N6.6 — inversione contabile: cessioni prodotti elettronici</option>
-              <option value="N6.7">N6.7 — inversione contabile: prestazioni comparto edile e settori connessi</option>
-              <option value="N6.8">N6.8 — inversione contabile: operazioni settore energetico</option>
-              <option value="N6.9">N6.9 — inversione contabile: altri casi</option>
-              <option value="N7">N7 — IVA assolta in altro stato UE</option>
-            </select>
-            <div class="form-text">
-              Obbligatoria con IVA 0%. <strong>Regime forfettario</strong> → N2.2.
-              <strong>Esportazioni</strong> → N3.1. <strong>Esenti</strong> (art. 10) → N4.
-              <a href="https://www.agenziaentrate.gov.it/portale/web/guest/cittadini/agevolazioni/regime-forfetario" target="_blank">Guida AdE</a>
+          <!-- Riepilogo totali (aggregato da righe + cassa + ritenuta) -->
+          <div class="row g-3 mb-3">
+            <div class="col-sm-6"></div>
+            <div class="col-sm-6">
+              <div class="bg-light rounded p-3 small">
+                <div class="d-flex justify-content-between mb-1">
+                  <span>Imponibile:</span>
+                  <span id="summary_imponibile" class="fw-semibold">€ 0,00</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1 d-none" id="summary_cassa_row">
+                  <span>+ Cassa previdenziale:</span>
+                  <span id="summary_cassa" class="fw-semibold">€ 0,00</span>
+                </div>
+                <div class="d-flex justify-content-between mb-1">
+                  <span>+ IVA:</span>
+                  <span id="summary_iva" class="fw-semibold">€ 0,00</span>
+                </div>
+                <hr class="my-2">
+                <div class="d-flex justify-content-between mb-1">
+                  <span class="fw-bold">Totale documento:</span>
+                  <span id="summary_totale" class="fw-bold fs-5">€ 0,00</span>
+                </div>
+                <div class="d-flex justify-content-between text-danger mb-1 d-none" id="summary_ritenuta_row">
+                  <span>− Ritenuta d'acconto:</span>
+                  <span id="summary_ritenuta">€ 0,00</span>
+                </div>
+                <div class="d-flex justify-content-between text-success border-top pt-2 d-none" id="summary_netto_row">
+                  <span class="fw-bold">Netto da incassare:</span>
+                  <span id="summary_netto" class="fw-bold">€ 0,00</span>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -330,39 +393,108 @@
 </div>
 
 <script>
-function updateTotale() {
-  const imp = parseFloat(document.getElementsByName('imponibile')[0].value) || 0;
-  const iva = parseFloat(document.getElementsByName('iva_rate')[0].value) || 0;
-  const cassaTipo = document.getElementById('cassa-tipologia-select').value || '';
-  const cassaAlq = parseFloat(document.getElementById('cassa-aliquota-input').value) || 0;
-  const ritTipo = document.getElementById('ritenuta-tipologia-select').value || '';
-  const ritAlq = parseFloat(document.getElementById('ritenuta-aliquota-input').value) || 0;
-  // Cassa e ritenuta attive solo se è stato scelto un tipo
-  const cassaImporto = cassaTipo ? (imp * cassaAlq / 100) : 0;
-  // Ritenuta calcolata SOLO sull'imponibile prestazione, NON sulla cassa
-  const ritImporto = ritTipo ? (imp * ritAlq / 100) : 0;
-  // IVA si applica su (imponibile + cassa)
-  const ivaBase = imp + cassaImporto;
-  const ivaImporto = ivaBase * iva / 100;
-  const tot = imp + cassaImporto + ivaImporto;
-  const netto = tot - ritImporto;
-  document.getElementById('cassa_importo_preview').value =
-    '€ ' + cassaImporto.toFixed(2).replace('.', ',');
-  document.getElementById('ritenuta_importo_preview').value =
-    '€ ' + ritImporto.toFixed(2).replace('.', ',');
-  document.getElementById('totale_preview').value =
-    '€ ' + tot.toFixed(2).replace('.', ',');
-  // Mostra "Netto da incassare" solo se c'è ritenuta
-  const nettoText = document.getElementById('netto_incassare_text');
-  const nettoVal = document.getElementById('netto_incassare_value');
-  if (ritImporto > 0) {
-    nettoVal.textContent = '€ ' + netto.toFixed(2).replace('.', ',');
-    nettoText.classList.remove('d-none');
+// ═════════ Righe dinamiche (Fase 3 Blocco B) ══════════════════════════════
+function fmtEur(v) {
+  return '€ ' + (v || 0).toFixed(2).replace('.', ',');
+}
+
+function addLine() {
+  const tpl = document.getElementById('line-template');
+  const tbody = document.getElementById('lines-tbody');
+  const clone = tpl.content.cloneNode(true);
+  tbody.appendChild(clone);
+  updateSummary();
+}
+
+function removeLine(btn) {
+  const tbody = document.getElementById('lines-tbody');
+  if (tbody.querySelectorAll('.line-row').length <= 1) {
+    alert('Deve esserci almeno una riga.');
+    return;
+  }
+  btn.closest('tr.line-row').remove();
+  updateSummary();
+}
+
+function updateLineTotale(el) {
+  const tr = el.closest('tr.line-row');
+  const q = parseFloat(tr.querySelector('.line-quantita').value) || 0;
+  const p = parseFloat(tr.querySelector('.line-prezzo').value) || 0;
+  tr.querySelector('.line-totale').textContent = fmtEur(q * p);
+}
+
+function updateLineNaturaVisibility(el) {
+  const tr = el.closest('tr.line-row');
+  const ivaSel = tr.querySelector('.line-iva');
+  const naturaSel = tr.querySelector('.line-natura');
+  const iva = parseFloat(ivaSel.value) || 0;
+  if (iva === 0) {
+    naturaSel.classList.remove('d-none');
+    naturaSel.required = true;
   } else {
-    nettoText.classList.add('d-none');
+    naturaSel.classList.add('d-none');
+    naturaSel.required = false;
+    naturaSel.value = '';
   }
 }
 
+// ═════════ Riepilogo aggregato ════════════════════════════════════════════
+function readLines() {
+  const rows = document.querySelectorAll('#lines-tbody tr.line-row');
+  return Array.from(rows).map(tr => ({
+    descrizione: tr.querySelector('.line-descrizione').value.trim(),
+    quantita:    parseFloat(tr.querySelector('.line-quantita').value) || 0,
+    unita_misura: tr.querySelector('.line-um').value.trim(),
+    prezzo_unitario: parseFloat(tr.querySelector('.line-prezzo').value) || 0,
+    aliquota_iva: parseFloat(tr.querySelector('.line-iva').value) || 0,
+    natura: tr.querySelector('.line-natura').value.trim()
+  }));
+}
+
+function updateSummary() {
+  const lines = readLines();
+  let imponibile = 0;
+  let ivaImporto = 0;
+  // IVA della prima riga (usata per cassa, MVP)
+  let firstIva = 0;
+  if (lines.length > 0) firstIva = lines[0].aliquota_iva;
+  // Aggregazione per riga
+  lines.forEach(l => {
+    const totRiga = l.quantita * l.prezzo_unitario;
+    imponibile += totRiga;
+    ivaImporto += totRiga * l.aliquota_iva / 100;
+  });
+  // Cassa previdenziale
+  const cassaTipo = document.getElementById('cassa-tipologia-select').value || '';
+  const cassaAlq = parseFloat(document.getElementById('cassa-aliquota-input').value) || 0;
+  const cassaImporto = cassaTipo ? (imponibile * cassaAlq / 100) : 0;
+  // IVA sulla cassa (alla stessa aliquota della prima riga)
+  ivaImporto += cassaImporto * firstIva / 100;
+  // Ritenuta d'acconto (su imponibile, NON su cassa)
+  const ritTipo = document.getElementById('ritenuta-tipologia-select').value || '';
+  const ritAlq = parseFloat(document.getElementById('ritenuta-aliquota-input').value) || 0;
+  const ritImporto = ritTipo ? (imponibile * ritAlq / 100) : 0;
+  const totale = imponibile + cassaImporto + ivaImporto;
+  const netto = totale - ritImporto;
+  // Render
+  document.getElementById('summary_imponibile').textContent = fmtEur(imponibile);
+  document.getElementById('summary_cassa').textContent = fmtEur(cassaImporto);
+  document.getElementById('summary_iva').textContent = fmtEur(ivaImporto);
+  document.getElementById('summary_totale').textContent = fmtEur(totale);
+  document.getElementById('summary_ritenuta').textContent = fmtEur(ritImporto);
+  document.getElementById('summary_netto').textContent = fmtEur(netto);
+  // Anteprime preview legacy (cassa/ritenuta nelle vecchie sezioni)
+  const cassaPrev = document.getElementById('cassa_importo_preview');
+  if (cassaPrev) cassaPrev.value = fmtEur(cassaImporto);
+  const ritPrev = document.getElementById('ritenuta_importo_preview');
+  if (ritPrev) ritPrev.value = fmtEur(ritImporto);
+  // Mostra/nascondi righe condizionali del riepilogo
+  document.getElementById('summary_cassa_row').classList.toggle('d-none', !cassaImporto);
+  document.getElementById('summary_ritenuta_row').classList.toggle('d-none', !ritImporto);
+  document.getElementById('summary_netto_row').classList.toggle('d-none', !ritImporto);
+}
+
+// ═════════ Client missing dati FatturaPA ══════════════════════════════════
 function updateClientMissing() {
   const sel = document.getElementById('client-select');
   const opt = sel.options[sel.selectedIndex];
@@ -384,21 +516,44 @@ function updateClientMissing() {
 }
 document.getElementById('client-select').addEventListener('change', updateClientMissing);
 
-function updateNaturaVisibility() {
-  const iva = parseFloat(document.getElementById('iva-rate-select').value) || 0;
-  const row = document.getElementById('natura-iva-row');
-  const sel = document.getElementById('natura-iva-select');
-  if (iva === 0) {
-    row.classList.remove('d-none');
-    sel.required = true;
-  } else {
-    row.classList.add('d-none');
-    sel.required = false;
-    sel.value = '';  // reset per evitare di mandare un valore obsoleto
+// ═════════ Submit: serializza righe in JSON nascosto ══════════════════════
+document.querySelector('form').addEventListener('submit', function(e) {
+  const lines = readLines();
+  if (lines.length === 0) {
+    e.preventDefault();
+    alert('Devi aggiungere almeno una riga.');
+    return;
   }
-}
-// Init: imposta lo stato giusto al caricamento
-updateNaturaVisibility();
+  // Validation cliente: descrizione + quantita > 0 + prezzo >= 0
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.descrizione) {
+      e.preventDefault();
+      alert('Riga ' + (i+1) + ': descrizione obbligatoria.');
+      return;
+    }
+    if (l.quantita <= 0) {
+      e.preventDefault();
+      alert('Riga ' + (i+1) + ': quantità deve essere > 0.');
+      return;
+    }
+    if (l.prezzo_unitario < 0) {
+      e.preventDefault();
+      alert('Riga ' + (i+1) + ': prezzo unitario non può essere negativo.');
+      return;
+    }
+    if (l.aliquota_iva === 0 && !l.natura) {
+      e.preventDefault();
+      alert('Riga ' + (i+1) + ': con IVA 0% devi indicare la Natura.');
+      return;
+    }
+  }
+  document.getElementById('lines-json').value = JSON.stringify(lines);
+});
+
+// ═════════ Init ═══════════════════════════════════════════════════════════
+// Aggiungi una riga iniziale al caricamento
+addLine();
 </script>
 
 {% endblock %}

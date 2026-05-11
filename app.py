@@ -609,14 +609,11 @@ def create_app():
             return redirect(url_for("new_client"))
 
         if request.method == "POST":
+            import json as _json
             try:
                 client_id = int(request.form.get("client_id", "0"))
-                imponibile = float(request.form.get("imponibile", "0").replace(",", "."))
-                iva_rate = float(request.form.get("iva_rate", "22").replace(",", "."))
-                description = request.form.get("description", "").strip() or "Prestazione di servizi"
                 issue_date = datetime.strptime(request.form.get("issue_date", ""), "%Y-%m-%d").date()
                 due_date = datetime.strptime(request.form.get("due_date", ""), "%Y-%m-%d").date()
-                natura_iva = (request.form.get("natura_iva", "") or "").strip().upper()
                 cassa_tipologia = (request.form.get("cassa_tipologia", "") or "").strip().upper()
                 cassa_aliquota = float(request.form.get("cassa_aliquota", "0").replace(",", ".") or "0")
                 ritenuta_tipologia = (request.form.get("ritenuta_tipologia", "") or "").strip().upper()
@@ -625,15 +622,57 @@ def create_app():
                 document_type = (request.form.get("document_type", "TD01") or "TD01").strip().upper()
                 if document_type not in ("TD01", "TD05", "TD06"):
                     document_type = "TD01"  # TD04 NC creata da route dedicata
+                # Righe di dettaglio: array JSON serializzato dal JS al submit
+                lines_raw = request.form.get("lines_json", "[]")
+                lines_data = _json.loads(lines_raw) if lines_raw else []
+                if not isinstance(lines_data, list) or not lines_data:
+                    raise ValueError("Almeno una riga di dettaglio è obbligatoria")
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
-            # Validazione coerenza Natura ↔ aliquota IVA
-            if iva_rate == 0 and not natura_iva:
-                flash("⚠️ Con IVA 0% devi indicare la Natura (es. N2.2 forfettario).", "warning")
-                return redirect(url_for("new_outgoing_invoice"))
-            if iva_rate > 0 and natura_iva:
-                natura_iva = ""  # ignora silenziosamente: Natura solo con IVA 0
+            # Normalizza + valida ogni riga
+            parsed_lines = []
+            for i, ln in enumerate(lines_data, start=1):
+                desc = str(ln.get("descrizione", "")).strip()
+                if not desc:
+                    flash(f"⚠️ Riga {i}: descrizione obbligatoria.", "warning")
+                    return redirect(url_for("new_outgoing_invoice"))
+                try:
+                    qta = float(ln.get("quantita") or 0)
+                    prezzo = float(ln.get("prezzo_unitario") or 0)
+                    iva_riga = float(ln.get("aliquota_iva") or 0)
+                except (TypeError, ValueError):
+                    flash(f"⚠️ Riga {i}: importi non numerici.", "warning")
+                    return redirect(url_for("new_outgoing_invoice"))
+                if qta <= 0 or prezzo < 0:
+                    flash(f"⚠️ Riga {i}: quantità > 0 e prezzo >= 0 obbligatori.", "warning")
+                    return redirect(url_for("new_outgoing_invoice"))
+                natura_riga = str(ln.get("natura", "")).strip().upper()
+                if iva_riga == 0 and not natura_riga:
+                    flash(f"⚠️ Riga {i}: con IVA 0% indica la Natura.", "warning")
+                    return redirect(url_for("new_outgoing_invoice"))
+                if iva_riga > 0:
+                    natura_riga = ""
+                parsed_lines.append({
+                    "descrizione": desc[:1000],
+                    "quantita": qta,
+                    "unita_misura": str(ln.get("unita_misura", "")).strip()[:20],
+                    "prezzo_unitario": round(prezzo, 2),
+                    "aliquota_iva": iva_riga,
+                    "natura": natura_riga,
+                })
+            # Aggregati: imponibile + IVA (per aliquota)
+            imponibile = round(sum(l["quantita"] * l["prezzo_unitario"]
+                                   for l in parsed_lines), 2)
+            iva_amount = round(sum(l["quantita"] * l["prezzo_unitario"]
+                                   * l["aliquota_iva"] / 100.0
+                                   for l in parsed_lines), 2)
+            # Natura "principale" (per Invoice.natura_iva sintetico) = prima riga
+            natura_iva = parsed_lines[0]["natura"] if parsed_lines else ""
+            # iva_rate "sintetico" = prima riga (per legacy Invoice.iva_rate)
+            iva_rate = parsed_lines[0]["aliquota_iva"] if parsed_lines else 22.0
+            # Descrizione "sintetica" Invoice.notes = prima riga
+            description = parsed_lines[0]["descrizione"] if parsed_lines else "Prestazione di servizi"
             # Validazione cassa previdenziale
             if cassa_tipologia and cassa_aliquota <= 0:
                 flash("⚠️ Cassa previdenziale: aliquota obbligatoria > 0.", "warning")
@@ -650,6 +689,12 @@ def create_app():
                 ritenuta_causale = ""
             # Ritenuta calcolata sull'imponibile prestazione (no cassa)
             ritenuta_importo = round(imponibile * ritenuta_aliquota / 100.0, 2)
+            # Riconfeziona iva_amount includendo la cassa (segue regola
+            # FatturaPA: l'IVA si applica anche sulla cassa, all'aliquota
+            # della prima riga MVP)
+            if cassa_importo > 0 and parsed_lines:
+                iva_amount += round(cassa_importo * parsed_lines[0]["aliquota_iva"] / 100.0, 2)
+                iva_amount = round(iva_amount, 2)
 
             client = Client.query.filter_by(id=client_id, user_id=uid).first()
             if not client:
@@ -670,9 +715,8 @@ def create_app():
                       "warning")
                 return redirect(url_for("edit_client", cid=client.id))
 
-            # Calcolo IVA + totale (la cassa si somma all'imponibile IVA)
-            iva_base = imponibile + cassa_importo
-            iva_amount = round(iva_base * iva_rate / 100.0, 2)
+            # Totale documento: imponibile + cassa + IVA (iva_amount già
+            # calcolato sopra aggregando per riga + cassa)
             totale = round(imponibile + cassa_importo + iva_amount, 2)
 
             # Numerazione progressiva per anno
@@ -700,6 +744,21 @@ def create_app():
                 ritenuta_causale=ritenuta_causale,
             )
             db.session.add(inv); db.session.commit()
+            # Persisti le righe di dettaglio (Fase 3 Blocco B)
+            from models import InvoiceLine
+            for idx, ln in enumerate(parsed_lines, start=1):
+                db.session.add(InvoiceLine(
+                    invoice_id=inv.id,
+                    numero_linea=idx,
+                    descrizione=ln["descrizione"],
+                    quantita=ln["quantita"],
+                    unita_misura=ln["unita_misura"],
+                    prezzo_unitario=ln["prezzo_unitario"],
+                    aliquota_iva=ln["aliquota_iva"],
+                    natura=ln["natura"],
+                ))
+            db.session.commit()
+            db.session.refresh(inv)  # carica inv.lines per il generatore
 
             try:
                 _build_outgoing_xml(inv)
