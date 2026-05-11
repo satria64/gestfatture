@@ -254,11 +254,16 @@ class Invoice(db.Model):
     imponibile         = db.Column(db.Float,  nullable=True)    # base imponibile (amount = imponibile + iva)
     iva_rate           = db.Column(db.Float,  default=22.0)     # aliquota IVA in %
     iva_amount         = db.Column(db.Float,  nullable=True)    # importo IVA calcolato
-    # SDI status: "" (non emessa) / draft / sent / delivered / rejected / decorsi_termini / non_consegnata
+    # SDI status: "" (non emessa) / draft / sent / pending / delivered / rejected /
+    # rejected_by_recipient / accepted / decorsi_termini / non_consegnata /
+    # recapito_impossibile / error
     sdi_status         = db.Column(db.String(40), default="")
-    sdi_message_id     = db.Column(db.String(80), default="")   # ID restituito da Aruba/SDI
+    sdi_message_id     = db.Column(db.String(80), default="")   # requestId Aruba (UUID)
     sdi_sent_at        = db.Column(db.DateTime, nullable=True)
     sdi_error          = db.Column(db.Text, default="")
+    # Filename restituito da Aruba (es. IT01879020517_xxxxx.xml.p7m). Usato per
+    # interrogare l'endpoint /api/v2/invoices-out/detail durante il polling stato.
+    aruba_filename     = db.Column(db.String(200), default="")
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")

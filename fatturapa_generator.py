@@ -93,6 +93,11 @@ class Fattura:
     causale: str = ""                 # opzionale
     data_scadenza: date | None = None
     modalita_pagamento: str = "MP05"  # MP05 = bonifico
+    # IdTrasmittente: se vuoto usa cedente.piva (download manuale, autoconsegna).
+    # Per invio via intermediario accreditato (es. Aruba PEC IT 01879020517) va
+    # valorizzato con la P.IVA dell'intermediario, altrimenti il SDI o
+    # l'intermediario rifiutano l'XML.
+    id_trasmittente_piva: str = ""
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -168,7 +173,7 @@ def _build_dati_trasmissione(parent: ET.Element, f: Fattura):
     dt = ET.SubElement(parent, "DatiTrasmissione")
     idt = ET.SubElement(dt, "IdTrasmittente")
     _add(idt, "IdPaese", "IT")
-    _add(idt, "IdCodice", f.cedente.piva)
+    _add(idt, "IdCodice", f.id_trasmittente_piva.strip() or f.cedente.piva)
     _add(dt, "ProgressivoInvio", f.progressivo_invio)
     _add(dt, "FormatoTrasmissione", "FPR12")  # FPR12 = privati B2B/B2C; FPA12 = PA
     _add(dt, "CodiceDestinatario", f.cessionario.codice_destinatario)

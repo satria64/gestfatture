@@ -4407,6 +4407,10 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN payment_method TEXT DEFAULT ''"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.payment_method")
+        if "aruba_filename" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN aruba_filename TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.aruba_filename")
 
         # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
         if "clients" in inspector.get_table_names():
