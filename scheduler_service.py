@@ -319,8 +319,60 @@ def start_scheduler(app):
         coalesce=True,
     )
 
+    # Polling stato fatture SDI inviate via Aruba (ogni 30 minuti)
+    def _aruba_poll_runner():
+        try:
+            with app.app_context():
+                import aruba_service
+                if not aruba_service.is_enabled():
+                    return
+                from models import db, Invoice
+                from datetime import datetime as _dt, timedelta as _td
+                # Cerca fatture in stato non-terminale inviate negli ultimi 90gg
+                cutoff = _dt.utcnow() - _td(days=90)
+                pending = (Invoice.query
+                           .filter(Invoice.is_outgoing.is_(True))
+                           .filter(Invoice.aruba_filename != "")
+                           .filter(Invoice.sdi_status.in_(("sent", "pending")))
+                           .filter(Invoice.sdi_sent_at >= cutoff)
+                           .limit(50)
+                           .all())
+                if not pending:
+                    return
+                log.info("Aruba polling: %d fatture in attesa stato SDI", len(pending))
+                for inv in pending:
+                    try:
+                        detail = aruba_service.get_invoice_detail(inv.aruba_filename)
+                        new_status = aruba_service.aruba_status_to_gestfatture(
+                            detail.get("status", "")
+                        )
+                        if new_status != inv.sdi_status:
+                            old = inv.sdi_status
+                            inv.sdi_status = new_status
+                            # sdiErrors[] disponibile se rejected/decorsi
+                            errs = detail.get("sdiErrors") or []
+                            if errs:
+                                inv.sdi_error = "; ".join(
+                                    str(e)[:200] for e in errs[:3]
+                                )[:500]
+                            db.session.commit()
+                            log.info("Aruba poll inv=%s %s → %s",
+                                     inv.number, old, new_status)
+                    except Exception as e:
+                        log.warning("Aruba poll inv=%s fallito: %s", inv.number, e)
+        except Exception as e:
+            log.error("Aruba poll globale fallito: %s", e, exc_info=True)
+    _scheduler.add_job(
+        func=_aruba_poll_runner,
+        trigger=IntervalTrigger(minutes=30),
+        id="aruba_sdi_poll",
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+    )
+
     _scheduler.start()
-    log.info("Scheduler avviato – solleciti 08:00, bank 07:00, bandi 06:00, backup mon 03:00, integrazioni")
+    log.info("Scheduler avviato – solleciti 08:00, bank 07:00, bandi 06:00, backup mon 03:00, aruba poll 30min, integrazioni")
     return _scheduler
 
 

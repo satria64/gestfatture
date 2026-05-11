@@ -531,6 +531,61 @@
     </div>
   </div>
 
+  <!-- Aruba SDI Fatturazione Elettronica (solo admin) -->
+  <div class="card border-0 shadow-sm mb-4 border-start border-success border-4">
+    <div class="card-header fw-semibold bg-success-subtle text-success-emphasis">
+      <i class="bi bi-send-check me-1"></i> Aruba SDI — Invio FatturaPA
+      <span class="badge bg-success ms-2">ADMIN</span>
+    </div>
+    <div class="card-body">
+      <div class="alert alert-info py-2 small mb-3">
+        Provider accreditato AdE per l'invio automatico delle fatture al <strong>SDI</strong> e la
+        conservazione sostitutiva 10 anni. Richiede piano <strong>Premium / Multiseller</strong>
+        di Aruba (un account gestisce le P.IVA di tutti gli utenti GestFatture come "cedenti",
+        registrate manualmente dal pannello web Aruba).
+        <ol class="mb-0 mt-2">
+          <li>Apri account su <a href="https://fatturazioneelettronica.aruba.it" target="_blank">fatturazioneelettronica.aruba.it</a> (contatta il loro Sales per il piano Multiseller)</li>
+          <li>Aspetta credenziali demo (sandbox) o production via mail</li>
+          <li>Dal pannello web Aruba registra i cedenti (P.IVA dei tuoi clienti)</li>
+          <li>Incolla qui <strong>Username</strong> + <strong>Password tecnica</strong>, seleziona ambiente, attiva il toggle</li>
+        </ol>
+      </div>
+      <div class="row g-3">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Aruba Username</label>
+          <input type="text" name="aruba_username" class="form-control font-monospace"
+                 placeholder="(lascia vuoto per non modificare)">
+          <div class="form-text">Username tecnico dell'utenza Premium. Verrà cifrato at-rest.</div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Aruba Password</label>
+          <input type="password" name="aruba_api_password" class="form-control"
+                 placeholder="(lascia vuoto per non modificare)">
+          <div class="form-text">Password tecnica. Diversa dalla password del pannello web. Cifrata at-rest.</div>
+        </div>
+      </div>
+      <div class="row g-3 mt-1">
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Environment</label>
+          <select name="aruba_environment" class="form-select">
+            {% set aenv = (settings.aruba_environment|default('sandbox', true)) or 'sandbox' %}
+            <option value="sandbox"    {% if aenv == 'sandbox' %}selected{% endif %}>Sandbox (demo, gratis)</option>
+            <option value="production" {% if aenv == 'production' %}selected{% endif %}>Production (live, a pagamento)</option>
+          </select>
+          <div class="form-text">Sandbox: <code>demows.fatturazioneelettronica.aruba.it</code></div>
+        </div>
+        <div class="col-md-6">
+          <label class="form-label fw-semibold">Stato invio</label>
+          <select name="aruba_enabled" class="form-select">
+            <option value="false" {% if settings.aruba_enabled != 'true' %}selected{% endif %}>Disattivato</option>
+            <option value="true"  {% if settings.aruba_enabled == 'true' %}selected{% endif %}>Attivato (mostra pulsante "Invia a SDI")</option>
+          </select>
+          <div class="form-text">Master toggle. Se off, le fatture restano scaricabili manualmente.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Backup S3 settimanale (solo admin) -->
   <div class="card border-0 shadow-sm mb-4 border-start border-warning border-4">
     <div class="card-header fw-semibold bg-warning-subtle text-warning-emphasis">

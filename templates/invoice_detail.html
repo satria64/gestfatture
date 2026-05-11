@@ -116,11 +116,16 @@
         {% set sdi_labels = {
           '': ('Non emessa', 'secondary'),
           'draft': ('XML pronto, non inviato', 'info'),
+          'pending': ('In elaborazione SDI', 'primary'),
           'sent': ('Inviata al SDI', 'primary'),
           'delivered': ('Consegnata al cliente', 'success'),
+          'accepted': ('Accettata dal destinatario', 'success'),
           'rejected': ('Scartata dal SDI', 'danger'),
+          'rejected_by_recipient': ('Rifiutata dal destinatario', 'danger'),
           'decorsi_termini': ('Decorsi termini (destinatario non rintracciabile)', 'warning'),
           'non_consegnata': ('Non consegnata', 'warning'),
+          'recapito_impossibile': ('Recapito impossibile', 'warning'),
+          'error': ('Errore invio', 'danger'),
         } %}
         {% set lbl, color = sdi_labels.get(inv.sdi_status or '', ('?', 'secondary')) %}
         <span class="badge bg-{{ color }}">{{ lbl }}</span>
@@ -169,22 +174,51 @@
         </div>
         {% endif %}
 
-        {% if inv.sdi_status not in ('sent', 'delivered') %}
-        <form method="post" action="{{ url_for('regenerate_invoice_xml', iid=inv.id) }}" class="d-inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <button class="btn btn-outline-secondary btn-sm" type="submit"
-                  title="Utile se hai modificato dati cedente o cliente">
-            <i class="bi bi-arrow-repeat me-1"></i> Rigenera XML
-          </button>
-        </form>
-        {% endif %}
+        <div class="d-flex flex-wrap gap-2 align-items-center">
+          {% if inv.sdi_status not in ('sent', 'pending', 'delivered', 'accepted') %}
+          <form method="post" action="{{ url_for('regenerate_invoice_xml', iid=inv.id) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-outline-secondary btn-sm" type="submit"
+                    title="Utile se hai modificato dati cedente o cliente">
+              <i class="bi bi-arrow-repeat me-1"></i> Rigenera XML
+            </button>
+          </form>
+          {% endif %}
 
+          {% if aruba_enabled and inv.sdi_status in ('', 'draft', 'error') and inv.xml_filename %}
+          <form method="post" action="{{ url_for('send_invoice_sdi', iid=inv.id) }}" class="d-inline"
+                onsubmit="return confirm('Inviare la fattura {{ inv.number }} al SDI via Aruba? L\'azione non è reversibile.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button class="btn btn-success btn-sm" type="submit">
+              <i class="bi bi-send-check me-1"></i> Invia a SDI via Aruba
+            </button>
+          </form>
+          {% endif %}
+
+          {% if inv.sdi_status in ('sent', 'pending') %}
+          <span class="badge bg-primary-subtle text-primary border border-primary-subtle">
+            <i class="bi bi-hourglass-split me-1"></i> Stato in aggiornamento automatico (polling ogni 30 min)
+          </span>
+          {% endif %}
+        </div>
+
+        {% if aruba_enabled %}
+        <div class="alert alert-success small mt-3 mb-0 d-flex align-items-center gap-2">
+          <i class="bi bi-shield-check fs-5"></i>
+          <div>
+            <strong>Aruba SDI attivo</strong>. Premi <em>Invia a SDI via Aruba</em> per trasmettere
+            automaticamente al SDI. Lo stato di consegna (RC) o eventuale scarto (NS) verrà
+            aggiornato in automatico ogni 30 minuti tramite polling.
+          </div>
+        </div>
+        {% else %}
         <div class="alert alert-info small mt-3 mb-0">
-          <strong>Per inviare al SDI</strong>: scarica l'XML, allegalo a una PEC e invialo a
+          <strong>Invio manuale</strong>: scarica l'XML, allegalo a una PEC e invialo a
           <code>sdi01@pec.fatturapa.it</code> (produzione) oppure
           <code>sdi02@pec.fatturapa.it</code> (test).
-          L'invio automatico via Aruba arriverà a breve nel piano Pro.
+          L'invio automatico via Aruba si attiva dalle Impostazioni admin (sezione "Aruba SDI").
         </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

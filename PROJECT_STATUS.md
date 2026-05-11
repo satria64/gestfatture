@@ -285,13 +285,18 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [x] Audit labels nuovi: accountant_enabled, invite_sent, invite_accepted, switch_in/out
 - [ ] Bonus oltre 20 clienti gestiti (da definire — Fase 1.5)
 
-#### Fase 2 — Fatturazione attiva (UI + Aruba sandbox)
-- [ ] Form `/invoices/new` con tutti i campi FatturaPA (cliente, codice destinatario, righe, IVA, ritenute)
-- [ ] Generatore XML FatturaPA 1.2.x conforme specifiche AdE
-- [ ] Integrazione **Aruba Fatturazione Elettronica API** (sandbox per test)
-- [ ] Polling ricevute SDI: consegnata / scartata / decorsi termini
-- [ ] Numerazione progressiva automatica per anno (campo `progressivo`)
-- [ ] Aggiornamento stato fattura via webhook/polling Aruba
+#### Fase 2 — Fatturazione attiva (MVP completato, integrazione Aruba pronta)
+- [x] Form `/invoices/emit` con campi FatturaPA (cliente, codice destinatario, riga unica, IVA singola aliquota)
+- [x] Generatore `fatturapa_generator.py` XML 1.2.x conforme AdE (TD01 B2B, MP05 bonifico)
+- [x] **Integrazione Aruba Fatturazione Elettronica API v2** (`aruba_service.py`): OAuth2 Password Grant, send_invoice POST `/services/invoice/upload`, list_invoices_out + get_invoice_detail per polling, mapping STATUS_MAP 1-10 → sdi_status. Pronto per sandbox `demows.fatturazioneelettronica.aruba.it` o production `ws.fatturazioneelettronica.aruba.it`.
+- [x] **Polling ricevute SDI ogni 30 min** via `_aruba_poll_runner` in scheduler_service.py: aggiorna `sdi_status` (consegnata/scartata/decorsi termini/non consegnata/ecc.)
+- [x] Numerazione progressiva annuale `_next_progressivo(uid, year)` (per-user, per-anno)
+- [x] Route `/invoices/<id>/send-sdi`: rigenera XML con IdTrasmittente Aruba PEC (IT 01879020517), invia, popola `aruba_filename` + `sdi_message_id` + `sdi_sent_at`
+- [x] Admin UI settings sezione "Aruba SDI" (`templates/settings.html`): username + password + environment sandbox/production + master toggle
+- [x] Pulsante "Invia a SDI via Aruba" su `invoice_detail.html` (visibile se aruba_enabled + sdi_status in '', 'draft', 'error')
+- [ ] **Aprire account Aruba Premium/Multiseller** (azione commerciale Marco, in corso 2026-05-11)
+- [ ] Registrare cedenti via web panel Aruba (P.IVA degli utenti GestFatture)
+- [ ] Test E2E sandbox quando arrivano credenziali demo
 
 #### Fase 3 — Edge cases + UI polish
 - [ ] TD04 Nota di Credito (con riferimento fattura originale)
@@ -354,7 +359,7 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending mode operativo end-to-end, Stripe LIVE approvato, in trattativa Partner Program Salt Edge per banche italiane vere)*
+*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending operativo, Stripe LIVE approvato, Fase 2.5 Aruba SDI integrazione codice completa — manca solo apertura account Aruba Premium)*
 
 ---
 

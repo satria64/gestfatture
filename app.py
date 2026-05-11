@@ -489,9 +489,13 @@ def create_app():
                  .scalar())
         return (max_p or 0) + 1
 
-    def _build_outgoing_xml(invoice):
+    def _build_outgoing_xml(invoice, transmitter_piva: str = ""):
         """Genera l'XML FatturaPA per una fattura emessa, lo salva su disco
-        e aggiorna invoice.xml_filename. Restituisce il path completo."""
+        e aggiorna invoice.xml_filename. Restituisce il path completo.
+
+        `transmitter_piva`: P.IVA dell'IdTrasmittente. Se vuoto usa cedente.piva
+        (XML "neutro" per download manuale/autoconsegna). Per invio via Aruba
+        va passato `ARUBA_PEC_PIVA` (IT 01879020517)."""
         from fatturapa_generator import (Fattura, Cedente, Cessionario, Riga,
                                           generate_xml, make_filename, encode_progressivo)
         from datetime import datetime as _dt
@@ -543,6 +547,7 @@ def create_app():
             progressivo_invio=encode_progressivo(prog_int),
             data_scadenza=invoice.due_date,
             modalita_pagamento="MP05",
+            id_trasmittente_piva=transmitter_piva,
         )
         xml_str = generate_xml(f)
         filename = make_filename(ced.piva, encode_progressivo(prog_int))
@@ -680,6 +685,60 @@ def create_app():
             flash("✅ XML rigenerato.", "success")
         except Exception as e:
             flash(f"❌ Errore rigenerazione: {e}", "danger")
+        return redirect(url_for("invoice_detail", iid=iid))
+
+    @app.route("/invoices/<int:iid>/send-sdi", methods=["POST"])
+    @login_required
+    @limiter.limit("20 per hour")
+    def send_invoice_sdi(iid):
+        """Invia una fattura emessa al SDI via Aruba Fatturazione Elettronica.
+        Rigenera l'XML con IdTrasmittente = Aruba PEC (IT 01879020517) e
+        chiama POST /services/invoice/upload. Aggiorna Invoice.sdi_status,
+        sdi_message_id, sdi_sent_at, aruba_filename."""
+        import aruba_service
+        inv = get_my_invoice(iid)
+        if not inv.is_outgoing:
+            abort(404)
+        if not aruba_service.is_enabled():
+            flash("⚠️ Aruba SDI non è abilitato. Configura le credenziali nelle Impostazioni admin.",
+                  "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        if inv.sdi_status not in ("", "draft", "error"):
+            flash(f"Fattura già in stato '{inv.sdi_status}': non posso reinviarla.", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        sender_piva = UserSetting.get(inv.user_id, "my_vat_number") or ""
+        if not sender_piva:
+            flash("⚠️ P.IVA cedente mancante. Compila i dati fiscali nelle Impostazioni.",
+                  "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        try:
+            # Rigenera XML con IdTrasmittente Aruba PEC (sovrascrive xml_filename)
+            _build_outgoing_xml(inv, transmitter_piva=aruba_service.ARUBA_PEC_PIVA)
+            # Leggi XML appena scritto e invialo
+            xml_path = os.path.join(get_upload_folder(), inv.xml_filename)
+            with open(xml_path, "r", encoding="utf-8") as fp:
+                xml_str = fp.read()
+            result = aruba_service.send_invoice(xml_str, sender_piva)
+            inv.sdi_status = "sent"
+            inv.sdi_message_id = result.get("request_id", "")[:80]
+            inv.sdi_sent_at = datetime.utcnow()
+            inv.aruba_filename = result.get("aruba_filename", "")[:200]
+            inv.sdi_error = ""
+            db.session.commit()
+            audit("invoice_sent_sdi",
+                  target=f"invoice:{inv.number}",
+                  details=f"aruba_filename:{inv.aruba_filename} req:{inv.sdi_message_id}")
+            flash(f"✅ Fattura {inv.number} inviata al SDI via Aruba. "
+                  "Lo stato di consegna sarà aggiornato automaticamente.", "success")
+        except Exception as e:
+            logging.exception("Errore invio Aruba SDI")
+            inv.sdi_status = "error"
+            inv.sdi_error = str(e)[:500]
+            db.session.commit()
+            audit("invoice_send_sdi_failed",
+                  target=f"invoice:{inv.number}",
+                  details=str(e)[:200])
+            flash(f"❌ Errore invio SDI: {e}", "danger")
         return redirect(url_for("invoice_detail", iid=iid))
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -2833,7 +2892,10 @@ def create_app():
     @app.route("/invoices/<int:iid>")
     @login_required
     def invoice_detail(iid):
-        return render_template("invoice_detail.html", inv=get_my_invoice(iid))
+        import aruba_service
+        return render_template("invoice_detail.html",
+                               inv=get_my_invoice(iid),
+                               aruba_enabled=aruba_service.is_enabled())
 
     @app.route("/invoices/<int:iid>/edit", methods=["GET", "POST"])
     @login_required
@@ -3734,6 +3796,8 @@ def create_app():
                       "gocardless_secret_id", "gocardless_secret_key",
                       "tink_client_id", "tink_client_secret",
                       "saltedge_app_id", "saltedge_app_secret", "saltedge_environment",
+                      "aruba_username", "aruba_api_password", "aruba_environment",
+                      "aruba_enabled",
                       "stripe_secret_key", "stripe_publishable_key", "stripe_price_id",
                       "signup_enabled"]
 
@@ -3752,6 +3816,7 @@ def create_app():
                              "gocardless_secret_key",
                              "tink_client_secret",
                              "saltedge_app_id", "saltedge_app_secret",
+                             "aruba_username", "aruba_api_password",
                              "stripe_secret_key") and not val:
                         continue
                     old_val = AppSettings.get(k, "")
