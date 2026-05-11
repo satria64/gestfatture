@@ -795,6 +795,32 @@ def create_app():
             mimetype="application/xml",
         )
 
+    @app.route("/invoices/<int:iid>/pdf")
+    @login_required
+    def invoice_pdf_preview(iid):
+        """Anteprima PDF (NON fiscalmente valida) della fattura emessa.
+        Inline di default (browser viewer); ?download=1 per scaricare."""
+        import io as _io
+        from pdf_invoice import generate_invoice_pdf
+        from flask import send_file
+        inv = get_my_invoice(iid)
+        if not inv.is_outgoing:
+            abort(404)
+        try:
+            pdf_bytes = generate_invoice_pdf(inv)
+        except Exception as e:
+            logging.exception("Errore generazione PDF anteprima")
+            flash(f"❌ Errore generazione PDF: {e}", "danger")
+            return redirect(url_for("invoice_detail", iid=iid))
+        as_download = request.args.get("download") == "1"
+        filename = f"anteprima_{inv.number.replace('/', '-')}.pdf"
+        return send_file(
+            _io.BytesIO(pdf_bytes),
+            mimetype="application/pdf",
+            as_attachment=as_download,
+            download_name=filename,
+        )
+
     @app.route("/invoices/<int:iid>/regenerate-xml", methods=["POST"])
     @login_required
     @limiter.limit("20 per hour")
