@@ -307,11 +307,11 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [x] **TD06 Parcella professionista + TD05 Nota debito** — select TipoDocumento nel form, whitelist server-side, combinabile con cassa+ritenuta (caso d'uso professionista classico)
 - [x] **TD04 Nota di Credito** — route `/invoices/<id>/create-nc` (storno totale), eredita importi/IVA/cassa/ritenuta da origine, `<DatiFattureCollegate>` con IdDocumento+Data, marca origine come `compensated`, no duplicati, pulsante UI in invoice_detail.html
 
-**Blocco B** (sessione dedicata, non iniziato):
-- [ ] Anteprima PDF prima invio (reportlab già in deps)
-- [ ] Righe multiple (storage: JSON in Invoice o nuovo modello InvoiceRiga)
-- [ ] Bozze salvate (UI elenco + edit pre-emissione)
-- [ ] Storno parziale NC (oggi solo totale)
+**Blocco B** (completato 2026-05-11):
+- [x] **Righe multiple** — nuovo modello `InvoiceLine` (FK invoice_id, numero_linea, descrizione, quantita, unita_misura, prezzo_unitario, aliquota_iva, natura) con cascade delete-orphan + migration backfill idempotente per fatture outgoing legacy. Form `/invoices/emit` con tabella dinamica add/remove riga, validazione client+server per riga, JSON serializzato in hidden field al submit, riepilogo totali aggregato live (Imponibile + Cassa + IVA → Totale → Ritenuta → Netto). Display in `invoice_detail.html` come tabella 8 colonne. NC copia righe 1:1 dall'origine.
+- [x] **Anteprima PDF** — nuovo modulo `pdf_invoice.py` con reportlab. Route `/invoices/<id>/pdf` (inline default, `?download=1` per attachment). Layout A4 con header, cedente+cessionario in 2 colonne, tabella righe (repeat header), cassa+ritenuta, riepilogo totali right-aligned con netto a pagare in verde, footer con disclaimer "NON fiscalmente valida". Bottone "Anteprima PDF" in `invoice_detail.html`.
+- [x] **Storno parziale NC** — `create_credit_note()` accetta form param `importo_storno` (default totale). Per parziale: 1 riga sintetica + IVA/cassa/ritenuta scalate proporzionalmente, origine NON marcata `compensated` (resta aperta per residuo), duplicati ammessi. Modal Bootstrap in `invoice_detail.html` con input importo e spiegazione.
+- [x] **Bozze salvate** — Invoice.is_draft (Boolean) + status_label override "Bozza". 2 bottoni submit nel form ("Emetti" con validation completa / "Salva bozza" con `formnovalidate`). Bozze hanno number "BOZZA-{id}", no progressivo, no XML, status="cancelled", escluse da `my_invoices()` e da scheduler solleciti. Pagina `/invoices/drafts` con lista, bottoni "Riprendi" (route `/edit-draft`) e "Elimina". JS init pre-popola tutto il form (cassa/ritenuta/righe) da hidden `#draft-data`. Voce sidebar "Bozze" sotto "Importa CSV/Excel".
 
 #### Fase 4 — Production rollout
 - [ ] Switch Aruba sandbox → production (account vero, contratto)
@@ -365,7 +365,7 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending operativo, Stripe LIVE approvato, Fase 2.5 Aruba SDI integrazione codice completa, Fase 3 Blocco A completo: Natura IVA + Cassa + Ritenuta + TD06/TD05 + TD04 NC)*
+*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending operativo, Stripe LIVE approvato, Fase 2.5 Aruba SDI integrazione codice completa, Fase 3 Blocco A + Blocco B completi: Natura IVA + Cassa + Ritenuta + TD06/TD05 + TD04 NC + Righe multiple + Anteprima PDF + Storno parziale NC + Bozze)*
 
 ---
 
