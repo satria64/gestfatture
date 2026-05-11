@@ -1456,8 +1456,33 @@ def create_app():
             audit("bank_connect_failed", details=f"{error_class}: {error_msg[:100]}")
             return redirect(url_for("bank_overview"))
         if not connection_id:
-            flash("Sessione scaduta o connection_id mancante.", "warning")
-            return redirect(url_for("bank_overview"))
+            # Salt Edge V6: dopo "Torna alla tua applicazione" dal success page,
+            # il widget redirecta al return_to con args VUOTI (i flag
+            # return_connection_id/return_error_class non bastano in questo flow).
+            # Recovery: leggi il customer_id cached e recupera l'ultima connection
+            # creata via GET /connections?customer_id=X.
+            cached_customer = UserSetting.get(current_user.id, "saltedge_customer_id") or ""
+            cached_customer = str(cached_customer).strip()
+            if cached_customer and cached_customer.lower() not in ("none", "null"):
+                try:
+                    conns = list_connections_for_customer(cached_customer)
+                    if conns:
+                        # Ordina per created_at desc (Salt Edge V6 fornisce created_at)
+                        sorted_conns = sorted(conns,
+                                              key=lambda c: c.get("created_at", ""),
+                                              reverse=True)
+                        latest = sorted_conns[0]
+                        connection_id = str(latest.get("id")
+                                            or latest.get("connection_id") or "").strip()
+                        customer_id = cached_customer
+                        logging.info("Salt Edge callback recovery: connection_id=%s "
+                                     "recuperata via API (customer=%s, %d conn totali)",
+                                     connection_id, customer_id, len(conns))
+                except Exception as e:
+                    logging.warning("Salt Edge callback recovery fallita: %s", e)
+            if not connection_id:
+                flash("Sessione scaduta o connection_id mancante.", "warning")
+                return redirect(url_for("bank_overview"))
         # State check (best-effort: Salt Edge a volte non rimanda i custom_fields)
         if expected_state and state_from_query and state_from_query != expected_state:
             flash("State CSRF non valido. Riprova.", "danger")
