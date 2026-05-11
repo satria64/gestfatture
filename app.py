@@ -549,6 +549,9 @@ def create_app():
             data_scadenza=invoice.due_date,
             modalita_pagamento="MP05",
             id_trasmittente_piva=transmitter_piva,
+            cassa_tipologia=(invoice.cassa_tipologia or "").strip(),
+            cassa_aliquota=invoice.cassa_aliquota or 0.0,
+            cassa_importo=invoice.cassa_importo or 0.0,
         )
         xml_str = generate_xml(f)
         filename = make_filename(ced.piva, encode_progressivo(prog_int))
@@ -590,6 +593,8 @@ def create_app():
                 issue_date = datetime.strptime(request.form.get("issue_date", ""), "%Y-%m-%d").date()
                 due_date = datetime.strptime(request.form.get("due_date", ""), "%Y-%m-%d").date()
                 natura_iva = (request.form.get("natura_iva", "") or "").strip().upper()
+                cassa_tipologia = (request.form.get("cassa_tipologia", "") or "").strip().upper()
+                cassa_aliquota = float(request.form.get("cassa_aliquota", "0").replace(",", ".") or "0")
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
@@ -599,6 +604,13 @@ def create_app():
                 return redirect(url_for("new_outgoing_invoice"))
             if iva_rate > 0 and natura_iva:
                 natura_iva = ""  # ignora silenziosamente: Natura solo con IVA 0
+            # Validazione cassa previdenziale
+            if cassa_tipologia and cassa_aliquota <= 0:
+                flash("⚠️ Cassa previdenziale: aliquota obbligatoria > 0.", "warning")
+                return redirect(url_for("new_outgoing_invoice"))
+            if not cassa_tipologia:
+                cassa_aliquota = 0.0
+            cassa_importo = round(imponibile * cassa_aliquota / 100.0, 2)
 
             client = Client.query.filter_by(id=client_id, user_id=uid).first()
             if not client:
@@ -619,9 +631,10 @@ def create_app():
                       "warning")
                 return redirect(url_for("edit_client", cid=client.id))
 
-            # Calcolo IVA + totale
-            iva_amount = round(imponibile * iva_rate / 100.0, 2)
-            totale = round(imponibile + iva_amount, 2)
+            # Calcolo IVA + totale (la cassa si somma all'imponibile IVA)
+            iva_base = imponibile + cassa_importo
+            iva_amount = round(iva_base * iva_rate / 100.0, 2)
+            totale = round(imponibile + cassa_importo + iva_amount, 2)
 
             # Numerazione progressiva per anno
             year = issue_date.year
@@ -639,6 +652,9 @@ def create_app():
                 notes=description,
                 sdi_status="draft",
                 natura_iva=natura_iva,
+                cassa_tipologia=cassa_tipologia,
+                cassa_aliquota=cassa_aliquota,
+                cassa_importo=cassa_importo,
             )
             db.session.add(inv); db.session.commit()
 
@@ -4487,6 +4503,18 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN natura_iva TEXT DEFAULT ''"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.natura_iva")
+        if "cassa_tipologia" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN cassa_tipologia TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.cassa_tipologia")
+        if "cassa_aliquota" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN cassa_aliquota REAL DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.cassa_aliquota")
+        if "cassa_importo" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN cassa_importo REAL DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.cassa_importo")
 
         # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
         if "clients" in inspector.get_table_names():

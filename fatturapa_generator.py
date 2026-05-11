@@ -102,6 +102,13 @@ class Fattura:
     # valorizzato con la P.IVA dell'intermediario, altrimenti il SDI o
     # l'intermediario rifiutano l'XML.
     id_trasmittente_piva: str = ""
+    # Cassa previdenziale (opzionale). TipoCassa AdE: TC01-TC22.
+    # Quando valorizzata, il blocco <DatiCassaPrevidenziale> finisce in
+    # DatiGeneraliDocumento e l'importo cassa si somma all'imponibile IVA
+    # del riepilogo (mantiene la stessa aliquota della prima riga).
+    cassa_tipologia: str = ""        # "" o TC01-TC22
+    cassa_aliquota: float = 0.0      # % es. 4.0
+    cassa_importo: float = 0.0       # in euro
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -246,6 +253,17 @@ def _build_dati_generali(parent: ET.Element, f: Fattura, totale: float):
     _add(dgd, "Data",                   _fmt_date(f.data))
     _add(dgd, "Numero",                 f.numero)
     _add(dgd, "ImportoTotaleDocumento", _fmt_amount(totale))
+    # Cassa previdenziale (opzionale). XSD: deve precedere Causale.
+    if f.cassa_tipologia and f.cassa_importo > 0:
+        dcp = ET.SubElement(dgd, "DatiCassaPrevidenziale")
+        _add(dcp, "TipoCassa",              f.cassa_tipologia)
+        _add(dcp, "AlCassa",                _fmt_amount(f.cassa_aliquota))
+        _add(dcp, "ImportoContributoCassa", _fmt_amount(f.cassa_importo))
+        # AliquotaIVA della cassa = quella della prima riga (assunzione MVP).
+        iva_cassa = f.righe[0].aliquota_iva if f.righe else 0.0
+        _add(dcp, "AliquotaIVA",            _fmt_amount(iva_cassa))
+        if iva_cassa == 0 and f.righe and f.righe[0].natura:
+            _add(dcp, "Natura", f.righe[0].natura)
     if f.causale:
         _add(dgd, "Causale", f.causale[:200])
 
@@ -275,6 +293,14 @@ def _build_dati_beni_servizi(parent: ET.Element, f: Fattura):
         key = (r.aliquota_iva, r.natura if r.aliquota_iva == 0 else "")
         aliquote.setdefault(key, 0.0)
         aliquote[key] += r.prezzo_totale
+    # La cassa previdenziale si somma all'imponibile della MEDESIMA aliquota
+    # della prima riga (assunzione MVP — fatture mono-aliquota).
+    if f.cassa_tipologia and f.cassa_importo > 0 and f.righe:
+        iva_cassa = f.righe[0].aliquota_iva
+        natura_cassa = f.righe[0].natura if iva_cassa == 0 else ""
+        cassa_key = (iva_cassa, natura_cassa)
+        aliquote.setdefault(cassa_key, 0.0)
+        aliquote[cassa_key] += f.cassa_importo
     for (aliquota, natura), imponibile in sorted(aliquote.items()):
         imponibile = round(imponibile, 2)
         imposta = round(imponibile * aliquota / 100.0, 2)
@@ -305,12 +331,18 @@ def generate_xml(fattura: Fattura) -> str:
     if errors:
         raise ValueError("FatturaPA non valida:\n- " + "\n- ".join(errors))
 
-    # Calcolo totale documento (imponibile + IVA)
+    # Calcolo totale documento (imponibile + IVA + eventuale cassa previdenziale).
+    # La cassa si somma all'imponibile dell'aliquota IVA della prima riga;
+    # l'IVA sulla cassa va inclusa anche lei nel totale.
     totale = 0.0
     for r in fattura.righe:
         imponibile_riga = r.prezzo_totale
         iva_riga = imponibile_riga * r.aliquota_iva / 100.0
         totale += imponibile_riga + iva_riga
+    if fattura.cassa_tipologia and fattura.cassa_importo > 0 and fattura.righe:
+        iva_cassa_rate = fattura.righe[0].aliquota_iva
+        iva_su_cassa = fattura.cassa_importo * iva_cassa_rate / 100.0
+        totale += fattura.cassa_importo + iva_su_cassa
     totale = round(totale, 2)
 
     # Root element con namespace

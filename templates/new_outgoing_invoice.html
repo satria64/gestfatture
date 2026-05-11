@@ -120,6 +120,53 @@
             </div>
           </div>
 
+          <!-- Cassa previdenziale (opzionale) -->
+          <div class="row g-3 mb-3">
+            <div class="col-sm-7">
+              <label class="form-label fw-semibold">Cassa previdenziale (opzionale)</label>
+              <select name="cassa_tipologia" id="cassa-tipologia-select" class="form-select"
+                      onchange="updateTotale()">
+                <option value="">— Nessuna —</option>
+                <option value="TC01">TC01 — Cassa Dottori Commercialisti</option>
+                <option value="TC02">TC02 — Cassa Forense (avvocati)</option>
+                <option value="TC03">TC03 — Cassa Geometri</option>
+                <option value="TC04">TC04 — Cassa Ingegneri/Architetti (INARCASSA)</option>
+                <option value="TC05">TC05 — Cassa Notariato</option>
+                <option value="TC06">TC06 — Cassa Ragionieri/Periti</option>
+                <option value="TC07">TC07 — ENASARCO (agenti commercio)</option>
+                <option value="TC08">TC08 — ENPACL (consulenti del lavoro)</option>
+                <option value="TC09">TC09 — ENPAM (medici)</option>
+                <option value="TC10">TC10 — Cassa Farmacisti</option>
+                <option value="TC11">TC11 — ENPAV (veterinari)</option>
+                <option value="TC12">TC12 — ENPAIA (impiegati agricoltura)</option>
+                <option value="TC13">TC13 — Cassa Periti Industriali</option>
+                <option value="TC14">TC14 — Cassa Assistenti Sociali</option>
+                <option value="TC15">TC15 — ENPAS impresa</option>
+                <option value="TC16">TC16 — INPGI (giornalisti)</option>
+                <option value="TC17">TC17 — ENPAB (biologi)</option>
+                <option value="TC18">TC18 — ENPAP (psicologi)</option>
+                <option value="TC19">TC19 — ENPAPI (infermieri liberi prof.)</option>
+                <option value="TC20">TC20 — Cassa Attuari</option>
+                <option value="TC21">TC21 — Cassa Dottori Agronomi/Forestali</option>
+                <option value="TC22">TC22 — INPS Gestione Separata (default no cassa categoria)</option>
+              </select>
+              <div class="form-text">
+                La cassa si applica all'imponibile e l'IVA si calcola su (imponibile + cassa).
+              </div>
+            </div>
+            <div class="col-sm-3">
+              <label class="form-label fw-semibold">Aliquota cassa (%)</label>
+              <input type="number" name="cassa_aliquota" id="cassa-aliquota-input"
+                     class="form-control" step="0.01" min="0" max="100"
+                     placeholder="es. 4.00" oninput="updateTotale()">
+              <div class="form-text">Es. INPS GS = 4%, Forense = 4%</div>
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label fw-semibold">Importo cassa</label>
+              <input type="text" id="cassa_importo_preview" class="form-control" readonly value="€ 0,00">
+            </div>
+          </div>
+
           <!-- Natura IVA: visibile solo quando aliquota = 0 -->
           <div id="natura-iva-row" class="mb-3 d-none">
             <label class="form-label fw-semibold">Natura IVA *</label>
@@ -201,8 +248,18 @@
 function updateTotale() {
   const imp = parseFloat(document.getElementsByName('imponibile')[0].value) || 0;
   const iva = parseFloat(document.getElementsByName('iva_rate')[0].value) || 0;
-  const tot = imp * (1 + iva / 100);
-  document.getElementById('totale_preview').value = '€ ' + tot.toFixed(2).replace('.', ',');
+  const cassaTipo = document.getElementById('cassa-tipologia-select').value || '';
+  const cassaAlq = parseFloat(document.getElementById('cassa-aliquota-input').value) || 0;
+  // Cassa attiva solo se è stato scelto un tipo
+  const cassaImporto = cassaTipo ? (imp * cassaAlq / 100) : 0;
+  // IVA si applica su (imponibile + cassa)
+  const ivaBase = imp + cassaImporto;
+  const ivaImporto = ivaBase * iva / 100;
+  const tot = imp + cassaImporto + ivaImporto;
+  document.getElementById('cassa_importo_preview').value =
+    '€ ' + cassaImporto.toFixed(2).replace('.', ',');
+  document.getElementById('totale_preview').value =
+    '€ ' + tot.toFixed(2).replace('.', ',');
 }
 
 function updateClientMissing() {

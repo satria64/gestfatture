@@ -268,6 +268,11 @@ class Invoice(db.Model):
     # Natura IVA: obbligatoria quando iva_rate=0. Valori AdE: N1 / N2.1 / N2.2 /
     # N3.1-N3.6 / N4 / N5 / N6.1-N6.9 / N7. Es: N2.2 per regime forfettario.
     natura_iva         = db.Column(db.String(10), default="")
+    # Cassa previdenziale (TC01-TC22). Si applica all'imponibile, l'IVA si
+    # calcola su (imponibile + cassa). TC22 = INPS Gestione Separata.
+    cassa_tipologia    = db.Column(db.String(6), default="")
+    cassa_aliquota     = db.Column(db.Float, default=0.0)   # % es. 4.0
+    cassa_importo      = db.Column(db.Float, default=0.0)   # = imponibile * aliquota/100
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")
