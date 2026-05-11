@@ -242,16 +242,71 @@
 
           {% if inv.document_type in ('TD01', 'TD05', 'TD06')
              and inv.status not in ('compensated', 'cancelled') %}
-          <form method="post" action="{{ url_for('create_credit_note', iid=inv.id) }}" class="d-inline"
-                onsubmit="return confirm('Creare una Nota di Credito (TD04) che storna totalmente la fattura {{ inv.number }}? La fattura origine verrà marcata come compensata.');">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button class="btn btn-outline-danger btn-sm" type="submit"
-                    title="Crea TD04 di storno totale">
-              <i class="bi bi-file-earmark-minus me-1"></i> Crea Nota di Credito
-            </button>
-          </form>
+          <button class="btn btn-outline-danger btn-sm" type="button"
+                  data-bs-toggle="modal" data-bs-target="#ncModal"
+                  title="Crea TD04 di storno totale o parziale">
+            <i class="bi bi-file-earmark-minus me-1"></i> Crea Nota di Credito
+          </button>
           {% endif %}
         </div>
+
+        {% if inv.document_type in ('TD01', 'TD05', 'TD06')
+           and inv.status not in ('compensated', 'cancelled') %}
+        <!-- Modal Nota di Credito -->
+        <div class="modal fade" id="ncModal" tabindex="-1" aria-hidden="true">
+          <div class="modal-dialog">
+            <form method="post" action="{{ url_for('create_credit_note', iid=inv.id) }}"
+                  class="modal-content">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <div class="modal-header">
+                <h5 class="modal-title">
+                  <i class="bi bi-file-earmark-minus text-danger me-1"></i>
+                  Crea Nota di Credito (TD04)
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+              </div>
+              <div class="modal-body">
+                <p class="small mb-3">
+                  Stai creando una nota di credito che storna la fattura
+                  <strong>{{ inv.number }}</strong> del
+                  {{ inv.issue_date.strftime('%d/%m/%Y') }}
+                  (imponibile {{ (inv.imponibile or inv.amount)|eur }}).
+                </p>
+                <div class="mb-3">
+                  <label class="form-label fw-semibold">Importo da stornare (imponibile) *</label>
+                  <div class="input-group">
+                    <span class="input-group-text">€</span>
+                    <input type="number" name="importo_storno" class="form-control"
+                           step="0.01" min="0.01"
+                           max="{{ '%.2f' % (inv.imponibile or inv.amount) }}"
+                           value="{{ '%.2f' % (inv.imponibile or inv.amount) }}"
+                           required>
+                  </div>
+                  <div class="form-text">
+                    Lascia il valore di default per <strong>storno totale</strong>
+                    (la fattura origine verrà marcata come <em>compensata</em>).
+                    Inserisci un importo minore per <strong>storno parziale</strong>
+                    (IVA, cassa e ritenuta verranno calcolate proporzionalmente; la
+                    fattura origine resta aperta per la parte residua).
+                  </div>
+                </div>
+                <div class="alert alert-warning small mb-0">
+                  <i class="bi bi-exclamation-triangle me-1"></i>
+                  Una volta creata, la NC <strong>non è modificabile</strong>: per
+                  storni ulteriori della stessa fattura origine puoi creare
+                  un'altra NC parziale (apri di nuovo questo modal).
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Annulla</button>
+                <button type="submit" class="btn btn-danger">
+                  <i class="bi bi-file-earmark-minus me-1"></i> Crea NC
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+        {% endif %}
 
         {% if aruba_enabled %}
         <div class="alert alert-success small mt-3 mb-0 d-flex align-items-center gap-2">

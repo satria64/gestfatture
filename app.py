@@ -844,11 +844,12 @@ def create_app():
     @login_required
     @limiter.limit("20 per hour")
     def create_credit_note(iid):
-        """Crea una Nota di Credito (TD04) per stornare totalmente una fattura
-        emessa. Crea una nuova Invoice con document_type='TD04',
-        linked_invoice_id=iid, importi copiati dalla fattura origine. Genera
-        subito l'XML 'neutro' (download); per inviarla al SDI usa il pulsante
-        'Invia a SDI via Aruba' dalla pagina di dettaglio della NC."""
+        """Crea una Nota di Credito (TD04) per stornare totalmente o
+        parzialmente una fattura emessa. Form param `importo_storno`:
+          - vuoto o = origin.imponibile  → storno totale (copia righe 1:1)
+          - < origin.imponibile          → storno parziale (1 riga sintetica)
+        L'origine resta `compensated` solo per storno totale; per parziale
+        diventa solo 'pending' (è ancora parzialmente da incassare)."""
         from fatturapa_generator import encode_progressivo
         origin = get_my_invoice(iid)
         if not origin.is_outgoing:
@@ -857,48 +858,73 @@ def create_app():
         if origin.document_type == "TD04":
             flash("Non puoi creare una NC di una NC.", "warning")
             return redirect(url_for("invoice_detail", iid=iid))
-        # Cerca se già esiste una NC collegata (evita duplicati)
-        existing_nc = Invoice.query.filter_by(
-            user_id=current_user.id, linked_invoice_id=origin.id,
-            document_type="TD04"
-        ).first()
-        if existing_nc:
-            flash(f"⚠️ Esiste già la NC {existing_nc.number} per questa fattura.",
-                  "warning")
-            return redirect(url_for("invoice_detail", iid=existing_nc.id))
-        # Numerazione progressiva annuale (separata? per ora condivisa con fatture)
+        origin_imp = float(origin.imponibile or origin.amount or 0)
+        if origin_imp <= 0:
+            flash("Fattura origine senza imponibile valido.", "danger")
+            return redirect(url_for("invoice_detail", iid=iid))
+        # Parsing importo storno (default = totale)
+        importo_raw = (request.form.get("importo_storno", "") or "").strip().replace(",", ".")
+        try:
+            importo_storno = float(importo_raw) if importo_raw else origin_imp
+        except ValueError:
+            flash("Importo storno non valido.", "danger")
+            return redirect(url_for("invoice_detail", iid=iid))
+        if importo_storno <= 0:
+            flash("L'importo da stornare deve essere > 0.", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        if importo_storno > origin_imp + 0.01:
+            flash(f"Importo storno (€{importo_storno:.2f}) supera l'imponibile "
+                  f"della fattura origine (€{origin_imp:.2f}).", "warning")
+            return redirect(url_for("invoice_detail", iid=iid))
+        is_parziale = importo_storno < origin_imp - 0.01
+        # Per storno totale: vieta duplicati (una sola NC totale per origin)
+        if not is_parziale:
+            existing_nc = Invoice.query.filter_by(
+                user_id=current_user.id, linked_invoice_id=origin.id,
+                document_type="TD04"
+            ).first()
+            if existing_nc:
+                flash(f"⚠️ Esiste già la NC {existing_nc.number} per questa "
+                      "fattura. Per uno storno parziale ulteriore, indica "
+                      "esplicitamente l'importo.", "warning")
+                return redirect(url_for("invoice_detail", iid=existing_nc.id))
+        # Calcolo proporzionale di IVA/cassa/ritenuta sul nuovo imponibile
+        ratio = importo_storno / origin_imp
+        nc_iva_amount = round((origin.iva_amount or 0) * ratio, 2)
+        nc_cassa_importo = round((origin.cassa_importo or 0) * ratio, 2)
+        nc_ritenuta_importo = round((origin.ritenuta_importo or 0) * ratio, 2)
+        nc_totale = round(importo_storno + nc_cassa_importo + nc_iva_amount, 2)
         year = date.today().year
         prog = _next_progressivo(current_user.id, year)
         nc_number = f"{prog}/{year}"
+        storno_label = "parziale" if is_parziale else "totale"
         nc = Invoice(
             user_id=current_user.id, client_id=origin.client_id,
-            number=nc_number, amount=origin.amount,
-            imponibile=origin.imponibile, iva_rate=origin.iva_rate,
-            iva_amount=origin.iva_amount,
+            number=nc_number, amount=nc_totale,
+            imponibile=importo_storno, iva_rate=origin.iva_rate,
+            iva_amount=nc_iva_amount,
             issue_date=date.today(),
             due_date=date.today(),
             document_type="TD04", status="cancelled",
             is_outgoing=True, is_passive=False,
             progressivo=prog,
-            notes=f"Storno totale fattura {origin.number} del "
+            notes=f"Storno {storno_label} fattura {origin.number} del "
                   f"{origin.issue_date.strftime('%d/%m/%Y')}",
             sdi_status="draft",
             linked_invoice_id=origin.id,
             natura_iva=origin.natura_iva or "",
             cassa_tipologia=origin.cassa_tipologia or "",
             cassa_aliquota=origin.cassa_aliquota or 0.0,
-            cassa_importo=origin.cassa_importo or 0.0,
+            cassa_importo=nc_cassa_importo,
             ritenuta_tipologia=origin.ritenuta_tipologia or "",
             ritenuta_aliquota=origin.ritenuta_aliquota or 0.0,
-            ritenuta_importo=origin.ritenuta_importo or 0.0,
+            ritenuta_importo=nc_ritenuta_importo,
             ritenuta_causale=origin.ritenuta_causale or "",
         )
         db.session.add(nc); db.session.commit()
-        # Copia le righe di dettaglio dalla fattura origine (Fase 3 Blocco B).
-        # Se l'origine ha righe le replico identiche; se è una fattura legacy
-        # senza righe (raro post-migration), fallback su singola riga sintetica.
+        # Storno totale: copia righe 1:1. Storno parziale: 1 riga sintetica.
         from models import InvoiceLine
-        if origin.lines:
+        if not is_parziale and origin.lines:
             for idx, ln in enumerate(origin.lines, start=1):
                 db.session.add(InvoiceLine(
                     invoice_id=nc.id,
@@ -914,24 +940,28 @@ def create_app():
             db.session.add(InvoiceLine(
                 invoice_id=nc.id,
                 numero_linea=1,
-                descrizione=(origin.notes or f"Storno fattura {origin.number}")[:1000],
+                descrizione=f"Storno {storno_label} fattura {origin.number} "
+                            f"del {origin.issue_date.strftime('%d/%m/%Y')}",
                 quantita=1.0,
-                prezzo_unitario=origin.imponibile or origin.amount or 0.0,
+                prezzo_unitario=importo_storno,
                 aliquota_iva=origin.iva_rate or 22.0,
                 natura=origin.natura_iva or "",
             ))
         db.session.commit()
         db.session.refresh(nc)
-        # Marca anche la fattura origine come compensata
-        origin.status = "compensated"
-        db.session.commit()
+        # Marca origine come compensata SOLO se storno totale
+        if not is_parziale:
+            origin.status = "compensated"
+            db.session.commit()
         try:
             _build_outgoing_xml(nc)
             audit("credit_note_created",
                   target=f"invoice:{nc.number}",
-                  details=f"storna:{origin.number}")
-            flash(f"✅ Nota di Credito {nc.number} creata (storno totale di "
-                  f"{origin.number}). XML pronto per il download.", "success")
+                  details=f"storna:{origin.number} tipo:{storno_label} "
+                          f"importo:{importo_storno:.2f}")
+            flash(f"✅ Nota di Credito {nc.number} creata (storno {storno_label} "
+                  f"€{importo_storno:.2f} di {origin.number}). "
+                  f"XML pronto per il download.", "success")
         except Exception as e:
             logging.exception("Errore generazione XML NC")
             flash(f"⚠️ NC creata ma errore XML: {e}", "warning")
