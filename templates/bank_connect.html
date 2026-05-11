@@ -9,8 +9,8 @@
 <div class="mb-4 mt-2">
   <h2><i class="bi bi-bank me-2"></i>Collega un conto bancario</h2>
   <p class="text-muted small">
-    Procedendo verrai reindirizzato al portale <strong>Tink</strong> (provider PSD2 di Visa)
-    dove sceglierai la tua banca italiana e autorizzerai l'accesso in
+    Procedendo verrai reindirizzato al widget <strong>Salt Edge</strong> (provider PSD2
+    accreditato EBA) dove sceglierai la tua banca e autorizzerai l'accesso in
     <strong>sola lettura</strong> alle transazioni.
   </p>
 </div>
@@ -19,8 +19,8 @@
   <div class="card-body">
     <h5 class="mb-3">Come funziona</h5>
     <ol class="small">
-      <li>Click sul bottone qui sotto → vai sul sito <strong>Tink</strong> (in italiano)</li>
-      <li>Cerca e seleziona la tua banca dalla lista (tutte le banche italiane sono coperte)</li>
+      <li>Click sul bottone qui sotto → si apre il widget <strong>Salt Edge Connect</strong></li>
+      <li>Cerca e seleziona la tua banca dalla lista (copertura completa banche italiane ed EU)</li>
       <li>Login sul portale della tua banca + autorizzazione SCA (codice OTP)</li>
       <li>Tornerai automaticamente qui con il conto collegato</li>
       <li>Click "Sincronizza" per scaricare le ultime 30-90gg di transazioni</li>
@@ -31,7 +31,7 @@
     <form method="post">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button class="btn btn-primary btn-lg w-100">
-        <i class="bi bi-box-arrow-up-right me-2"></i> Vai a Tink per collegare
+        <i class="bi bi-box-arrow-up-right me-2"></i> Apri Salt Edge per collegare
       </button>
     </form>
   </div>
@@ -40,9 +40,9 @@
 <div class="alert alert-info small mt-4" style="max-width:640px">
   <i class="bi bi-shield-check me-1"></i>
   <strong>Sicurezza</strong>: la tua password della banca <em>non passa MAI</em> da
-  GestFatture, né da Tink. Si autentica direttamente sul portale della tua banca.
-  GestFatture riceve da Tink solo un token in <strong>sola lettura</strong>, valido
-  90 giorni. Niente bonifici, niente movimenti di denaro: solo lettura della lista
-  movimenti per riconciliarli con le tue fatture.
+  GestFatture, né da Salt Edge. Si autentica direttamente sul portale della tua banca.
+  GestFatture riceve da Salt Edge solo una connessione in <strong>sola lettura</strong>,
+  valida 90 giorni (limite PSD2). Niente bonifici, niente movimenti di denaro: solo
+  lettura della lista movimenti per riconciliarli con le tue fatture.
 </div>
 {% endblock %}

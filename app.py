@@ -3794,7 +3794,6 @@ def create_app():
                       "backup_s3_access_key_id", "backup_s3_secret_access_key",
                       "backup_s3_region", "backup_s3_retention_days", "backup_s3_prefix",
                       "gocardless_secret_id", "gocardless_secret_key",
-                      "tink_client_id", "tink_client_secret",
                       "saltedge_app_id", "saltedge_app_secret", "saltedge_environment",
                       "aruba_username", "aruba_api_password", "aruba_environment",
                       "aruba_enabled",
@@ -3814,7 +3813,6 @@ def create_app():
                     if k in ("smtp_password", "resend_api_key",
                              "backup_s3_secret_access_key",
                              "gocardless_secret_key",
-                             "tink_client_secret",
                              "saltedge_app_id", "saltedge_app_secret",
                              "aruba_username", "aruba_api_password",
                              "stripe_secret_key") and not val:
