@@ -299,13 +299,19 @@ Tutto implementato. Per attivare in produzione restano solo configurazioni:
 - [ ] Test E2E sandbox quando arrivano credenziali demo
 
 #### Fase 3 — Edge cases + UI polish
-- [ ] TD04 Nota di Credito (con riferimento fattura originale)
-- [ ] TD06 Parcella professionista
-- [ ] Ritenuta d'acconto (RT01-RT06)
-- [ ] Cassa previdenziale (TC01-TC22)
-- [ ] Esenzioni IVA (Natura N1-N7)
-- [ ] Anteprima PDF prima invio
-- [ ] Bozze salvate
+
+**Blocco A** (completato 2026-05-11):
+- [x] **Esenzioni IVA (Natura N1-N7)** — `Riga.natura` + `<Natura>` in DettaglioLinee/DatiRiepilogo, aggregazione riepilogo per (aliquota, natura), 21 codici AdE (N1, N2.1, N2.2, N3.1-N3.6, N4, N5, N6.1-N6.9, N7), select condizionale visibile con IVA 0% (regime forfettario, esportazioni, esenti, inversione contabile)
+- [x] **Cassa previdenziale (TC01-TC22)** — `<DatiCassaPrevidenziale>` in DatiGeneraliDocumento, importo cassa sommato all'imponibile IVA del riepilogo (assunzione MVP: mono-aliquota), 22 tipi cassa AdE, calcolo auto importo+totale, marcata `<Ritenuta>SI</Ritenuta>` se coesiste con ritenuta
+- [x] **Ritenuta d'acconto (RT01-RT06 + causali)** — `<DatiRitenuta>` con TipoRitenuta/ImportoRitenuta/AliquotaRitenuta/CausalePagamento, 30+ codici causale AdE (modello 770: A, B, C, ..., Z, L1, M1, M2, O1, V1), preview "Netto da incassare" in form (totale - ritenuta)
+- [x] **TD06 Parcella professionista + TD05 Nota debito** — select TipoDocumento nel form, whitelist server-side, combinabile con cassa+ritenuta (caso d'uso professionista classico)
+- [x] **TD04 Nota di Credito** — route `/invoices/<id>/create-nc` (storno totale), eredita importi/IVA/cassa/ritenuta da origine, `<DatiFattureCollegate>` con IdDocumento+Data, marca origine come `compensated`, no duplicati, pulsante UI in invoice_detail.html
+
+**Blocco B** (sessione dedicata, non iniziato):
+- [ ] Anteprima PDF prima invio (reportlab già in deps)
+- [ ] Righe multiple (storage: JSON in Invoice o nuovo modello InvoiceRiga)
+- [ ] Bozze salvate (UI elenco + edit pre-emissione)
+- [ ] Storno parziale NC (oggi solo totale)
 
 #### Fase 4 — Production rollout
 - [ ] Switch Aruba sandbox → production (account vero, contratto)
@@ -359,7 +365,7 @@ Claude Code legge automaticamente tutti i file e ha il contesto completo.
 
 ---
 
-*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending operativo, Stripe LIVE approvato, Fase 2.5 Aruba SDI integrazione codice completa — manca solo apertura account Aruba Premium)*
+*Ultimo aggiornamento: 2026-05-11 (Salt Edge V6 Pending operativo, Stripe LIVE approvato, Fase 2.5 Aruba SDI integrazione codice completa, Fase 3 Blocco A completo: Natura IVA + Cassa + Ritenuta + TD06/TD05 + TD04 NC)*
 
 ---
 
