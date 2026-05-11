@@ -552,6 +552,10 @@ def create_app():
             cassa_tipologia=(invoice.cassa_tipologia or "").strip(),
             cassa_aliquota=invoice.cassa_aliquota or 0.0,
             cassa_importo=invoice.cassa_importo or 0.0,
+            ritenuta_tipologia=(invoice.ritenuta_tipologia or "").strip(),
+            ritenuta_aliquota=invoice.ritenuta_aliquota or 0.0,
+            ritenuta_importo=invoice.ritenuta_importo or 0.0,
+            ritenuta_causale=(invoice.ritenuta_causale or "").strip(),
         )
         xml_str = generate_xml(f)
         filename = make_filename(ced.piva, encode_progressivo(prog_int))
@@ -595,6 +599,9 @@ def create_app():
                 natura_iva = (request.form.get("natura_iva", "") or "").strip().upper()
                 cassa_tipologia = (request.form.get("cassa_tipologia", "") or "").strip().upper()
                 cassa_aliquota = float(request.form.get("cassa_aliquota", "0").replace(",", ".") or "0")
+                ritenuta_tipologia = (request.form.get("ritenuta_tipologia", "") or "").strip().upper()
+                ritenuta_aliquota = float(request.form.get("ritenuta_aliquota", "0").replace(",", ".") or "0")
+                ritenuta_causale = (request.form.get("ritenuta_causale", "") or "").strip().upper()
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
@@ -611,6 +618,15 @@ def create_app():
             if not cassa_tipologia:
                 cassa_aliquota = 0.0
             cassa_importo = round(imponibile * cassa_aliquota / 100.0, 2)
+            # Validazione ritenuta d'acconto
+            if ritenuta_tipologia and (ritenuta_aliquota <= 0 or not ritenuta_causale):
+                flash("⚠️ Ritenuta d'acconto: aliquota > 0 e causale obbligatorie.", "warning")
+                return redirect(url_for("new_outgoing_invoice"))
+            if not ritenuta_tipologia:
+                ritenuta_aliquota = 0.0
+                ritenuta_causale = ""
+            # Ritenuta calcolata sull'imponibile prestazione (no cassa)
+            ritenuta_importo = round(imponibile * ritenuta_aliquota / 100.0, 2)
 
             client = Client.query.filter_by(id=client_id, user_id=uid).first()
             if not client:
@@ -655,6 +671,10 @@ def create_app():
                 cassa_tipologia=cassa_tipologia,
                 cassa_aliquota=cassa_aliquota,
                 cassa_importo=cassa_importo,
+                ritenuta_tipologia=ritenuta_tipologia,
+                ritenuta_aliquota=ritenuta_aliquota,
+                ritenuta_importo=ritenuta_importo,
+                ritenuta_causale=ritenuta_causale,
             )
             db.session.add(inv); db.session.commit()
 
@@ -4515,6 +4535,22 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN cassa_importo REAL DEFAULT 0"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.cassa_importo")
+        if "ritenuta_tipologia" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_tipologia TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.ritenuta_tipologia")
+        if "ritenuta_aliquota" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_aliquota REAL DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.ritenuta_aliquota")
+        if "ritenuta_importo" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_importo REAL DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.ritenuta_importo")
+        if "ritenuta_causale" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_causale TEXT DEFAULT ''"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.ritenuta_causale")
 
         # ── Tabella clients: flag fornitore + IBAN ──────────────────────────
         if "clients" in inspector.get_table_names():

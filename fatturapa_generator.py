@@ -109,6 +109,14 @@ class Fattura:
     cassa_tipologia: str = ""        # "" o TC01-TC22
     cassa_aliquota: float = 0.0      # % es. 4.0
     cassa_importo: float = 0.0       # in euro
+    # Ritenuta d'acconto (opzionale). TipoRitenuta AdE: RT01-RT06.
+    # Calcolata sull'imponibile prestazione (NON sulla cassa). Solo informativa
+    # nel XML: ImportoTotaleDocumento resta lordo, il cessionario trattiene
+    # la ritenuta al pagamento.
+    ritenuta_tipologia: str = ""     # "" o RT01-RT06
+    ritenuta_aliquota: float = 0.0   # % es. 20.0
+    ritenuta_importo: float = 0.0    # in euro
+    ritenuta_causale: str = ""       # codice causale: A, M, W, M1, ecc.
 
 
 # ─── Helpers ───────────────────────────────────────────────────────────────
@@ -253,6 +261,13 @@ def _build_dati_generali(parent: ET.Element, f: Fattura, totale: float):
     _add(dgd, "Data",                   _fmt_date(f.data))
     _add(dgd, "Numero",                 f.numero)
     _add(dgd, "ImportoTotaleDocumento", _fmt_amount(totale))
+    # Ritenuta d'acconto (opzionale). XSD: precede DatiCassaPrevidenziale e Causale.
+    if f.ritenuta_tipologia and f.ritenuta_importo > 0:
+        dr = ET.SubElement(dgd, "DatiRitenuta")
+        _add(dr, "TipoRitenuta",     f.ritenuta_tipologia)
+        _add(dr, "ImportoRitenuta",  _fmt_amount(f.ritenuta_importo))
+        _add(dr, "AliquotaRitenuta", _fmt_amount(f.ritenuta_aliquota))
+        _add(dr, "CausalePagamento", f.ritenuta_causale or "A")
     # Cassa previdenziale (opzionale). XSD: deve precedere Causale.
     if f.cassa_tipologia and f.cassa_importo > 0:
         dcp = ET.SubElement(dgd, "DatiCassaPrevidenziale")
@@ -264,6 +279,9 @@ def _build_dati_generali(parent: ET.Element, f: Fattura, totale: float):
         _add(dcp, "AliquotaIVA",            _fmt_amount(iva_cassa))
         if iva_cassa == 0 and f.righe and f.righe[0].natura:
             _add(dcp, "Natura", f.righe[0].natura)
+        # Se ritenuta presente, marca la cassa come soggetta a ritenuta
+        if f.ritenuta_tipologia and f.ritenuta_importo > 0:
+            _add(dcp, "Ritenuta", "SI")
     if f.causale:
         _add(dgd, "Causale", f.causale[:200])
 

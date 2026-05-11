@@ -273,6 +273,13 @@ class Invoice(db.Model):
     cassa_tipologia    = db.Column(db.String(6), default="")
     cassa_aliquota     = db.Column(db.Float, default=0.0)   # % es. 4.0
     cassa_importo      = db.Column(db.Float, default=0.0)   # = imponibile * aliquota/100
+    # Ritenuta d'acconto (RT01-RT06). Calcolata sull'imponibile prestazione,
+    # NON sulla cassa. È solo informativa nel XML — il totale documento
+    # rimane il lordo; il cliente trattiene la ritenuta al pagamento.
+    ritenuta_tipologia = db.Column(db.String(6), default="")  # RT01-RT06
+    ritenuta_aliquota  = db.Column(db.Float, default=0.0)     # % es. 20.0
+    ritenuta_importo   = db.Column(db.Float, default=0.0)     # = imponibile * aliquota/100
+    ritenuta_causale   = db.Column(db.String(4), default="")  # A, M, W, M1, ecc.
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")

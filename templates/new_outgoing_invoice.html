@@ -114,9 +114,13 @@
               </select>
             </div>
             <div class="col-sm-3">
-              <label class="form-label fw-semibold">Totale</label>
+              <label class="form-label fw-semibold">Totale documento</label>
               <input type="text" id="totale_preview" class="form-control fw-bold" readonly value="€ 0,00">
-              <div class="form-text">IVA inclusa.</div>
+              <div class="form-text">
+                IVA inclusa. <span id="netto_incassare_text" class="text-success d-none">
+                  Netto da incassare: <strong id="netto_incassare_value">€ 0,00</strong>
+                </span>
+              </div>
             </div>
           </div>
 
@@ -164,6 +168,72 @@
             <div class="col-sm-2">
               <label class="form-label fw-semibold">Importo cassa</label>
               <input type="text" id="cassa_importo_preview" class="form-control" readonly value="€ 0,00">
+            </div>
+          </div>
+
+          <!-- Ritenuta d'acconto (opzionale) -->
+          <div class="row g-3 mb-3">
+            <div class="col-sm-4">
+              <label class="form-label fw-semibold">Ritenuta d'acconto (opzionale)</label>
+              <select name="ritenuta_tipologia" id="ritenuta-tipologia-select" class="form-select"
+                      onchange="updateTotale()">
+                <option value="">— Nessuna —</option>
+                <option value="RT01">RT01 — Ritenuta persone fisiche</option>
+                <option value="RT02">RT02 — Ritenuta persone giuridiche</option>
+                <option value="RT03">RT03 — Contributo INPS</option>
+                <option value="RT04">RT04 — Contributo ENASARCO</option>
+                <option value="RT05">RT05 — Contributo ENPAM</option>
+                <option value="RT06">RT06 — Altro</option>
+              </select>
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label fw-semibold">Aliquota (%)</label>
+              <input type="number" name="ritenuta_aliquota" id="ritenuta-aliquota-input"
+                     class="form-control" step="0.01" min="0" max="100"
+                     placeholder="es. 20.00" oninput="updateTotale()">
+              <div class="form-text">Es. 20% (RT01 prof.)</div>
+            </div>
+            <div class="col-sm-4">
+              <label class="form-label fw-semibold">Causale pagamento</label>
+              <select name="ritenuta_causale" id="ritenuta-causale-select" class="form-select">
+                <option value="">— Seleziona —</option>
+                <option value="A">A — Prestazioni lavoro autonomo professionali</option>
+                <option value="B">B — Utilizzazione opere ingegno (no aut.)</option>
+                <option value="C">C — Indennità cessazione attività agente</option>
+                <option value="D">D — Indennità cessazione funzioni notarili</option>
+                <option value="E">E — Indennità cessazione raccoglitori tabacco</option>
+                <option value="F">F — Diritti d'autore (autori)</option>
+                <option value="G">G — Cessione diritti d'autore (terzi)</option>
+                <option value="H">H — Indennità cessazione rapp. agenzia</option>
+                <option value="I">I — Indennità cessazione lavoratori sportivi</option>
+                <option value="J">J — Provvigioni agenti monomandatari</option>
+                <option value="K">K — Universita varie</option>
+                <option value="L">L — Utilizzazione opere ingegno (autori)</option>
+                <option value="L1">L1 — Cessione opere ingegno aventi causa</option>
+                <option value="M">M — Prestazioni lavoro autonomo non abituale</option>
+                <option value="M1">M1 — Redditi lavoro autonomo occasionale</option>
+                <option value="M2">M2 — Prestazioni occasionali no assicurazione obbligatoria</option>
+                <option value="N">N — Indennità trasferta amministratori</option>
+                <option value="O">O — Prestazioni occasionali no INPS</option>
+                <option value="O1">O1 — Lavoro autonomo no INPS</option>
+                <option value="P">P — Compensi corrisposti a soggetti non residenti</option>
+                <option value="Q">Q — Provvigioni agenti plurimandatari</option>
+                <option value="R">R — Provvigioni commissionari</option>
+                <option value="S">S — Provvigioni mediatori</option>
+                <option value="T">T — Provvigioni rappresentanti commercio</option>
+                <option value="U">U — Provvigioni procacciatori d'affari</option>
+                <option value="V">V — Provvigioni dovute a incaricati vendita a domicilio</option>
+                <option value="V1">V1 — Redditi attività commerciali non abituali</option>
+                <option value="W">W — Corrispettivi a ditte individuali artigiane</option>
+                <option value="X">X — Canoni corrisposti dall'1.1.2004</option>
+                <option value="Y">Y — Canoni corrisposti dal 9.10.2002</option>
+                <option value="Z">Z — Titolo diverso dai precedenti</option>
+              </select>
+              <div class="form-text">Codice causale AdE (modello 770).</div>
+            </div>
+            <div class="col-sm-2">
+              <label class="form-label fw-semibold">Importo ritenuta</label>
+              <input type="text" id="ritenuta_importo_preview" class="form-control text-danger" readonly value="€ 0,00">
             </div>
           </div>
 
@@ -250,16 +320,32 @@ function updateTotale() {
   const iva = parseFloat(document.getElementsByName('iva_rate')[0].value) || 0;
   const cassaTipo = document.getElementById('cassa-tipologia-select').value || '';
   const cassaAlq = parseFloat(document.getElementById('cassa-aliquota-input').value) || 0;
-  // Cassa attiva solo se è stato scelto un tipo
+  const ritTipo = document.getElementById('ritenuta-tipologia-select').value || '';
+  const ritAlq = parseFloat(document.getElementById('ritenuta-aliquota-input').value) || 0;
+  // Cassa e ritenuta attive solo se è stato scelto un tipo
   const cassaImporto = cassaTipo ? (imp * cassaAlq / 100) : 0;
+  // Ritenuta calcolata SOLO sull'imponibile prestazione, NON sulla cassa
+  const ritImporto = ritTipo ? (imp * ritAlq / 100) : 0;
   // IVA si applica su (imponibile + cassa)
   const ivaBase = imp + cassaImporto;
   const ivaImporto = ivaBase * iva / 100;
   const tot = imp + cassaImporto + ivaImporto;
+  const netto = tot - ritImporto;
   document.getElementById('cassa_importo_preview').value =
     '€ ' + cassaImporto.toFixed(2).replace('.', ',');
+  document.getElementById('ritenuta_importo_preview').value =
+    '€ ' + ritImporto.toFixed(2).replace('.', ',');
   document.getElementById('totale_preview').value =
     '€ ' + tot.toFixed(2).replace('.', ',');
+  // Mostra "Netto da incassare" solo se c'è ritenuta
+  const nettoText = document.getElementById('netto_incassare_text');
+  const nettoVal = document.getElementById('netto_incassare_value');
+  if (ritImporto > 0) {
+    nettoVal.textContent = '€ ' + netto.toFixed(2).replace('.', ',');
+    nettoText.classList.remove('d-none');
+  } else {
+    nettoText.classList.add('d-none');
+  }
 }
 
 function updateClientMissing() {
