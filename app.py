@@ -38,15 +38,22 @@ def my_suppliers():
 
 
 def my_invoices():
-    """Fatture attive (emesse a clienti). Esclude le passive."""
+    """Fatture attive finalizzate (emesse a clienti). Esclude passive e bozze."""
     return Invoice.query.filter_by(user_id=current_user.id).filter(
         db.or_(Invoice.is_passive.is_(False), Invoice.is_passive.is_(None))
+    ).filter(
+        db.or_(Invoice.is_draft.is_(False), Invoice.is_draft.is_(None))
     )
 
 
 def my_payables():
     """Fatture passive (ricevute da fornitori)."""
     return Invoice.query.filter_by(user_id=current_user.id, is_passive=True)
+
+
+def my_drafts():
+    """Bozze fatture salvate (non ancora finalizzate, senza progressivo/XML)."""
+    return Invoice.query.filter_by(user_id=current_user.id, is_draft=True)
 
 
 def get_my_client(cid):
@@ -610,10 +617,16 @@ def create_app():
 
         if request.method == "POST":
             import json as _json
+            action = (request.form.get("action", "submit") or "submit").strip().lower()
+            is_draft_save = (action == "draft")
             try:
-                client_id = int(request.form.get("client_id", "0"))
-                issue_date = datetime.strptime(request.form.get("issue_date", ""), "%Y-%m-%d").date()
-                due_date = datetime.strptime(request.form.get("due_date", ""), "%Y-%m-%d").date()
+                client_id = int(request.form.get("client_id", "0") or "0")
+                issue_date_raw = request.form.get("issue_date", "")
+                due_date_raw = request.form.get("due_date", "")
+                issue_date = (datetime.strptime(issue_date_raw, "%Y-%m-%d").date()
+                              if issue_date_raw else date.today())
+                due_date = (datetime.strptime(due_date_raw, "%Y-%m-%d").date()
+                            if due_date_raw else date.today())
                 cassa_tipologia = (request.form.get("cassa_tipologia", "") or "").strip().upper()
                 cassa_aliquota = float(request.form.get("cassa_aliquota", "0").replace(",", ".") or "0")
                 ritenuta_tipologia = (request.form.get("ritenuta_tipologia", "") or "").strip().upper()
@@ -625,7 +638,9 @@ def create_app():
                 # Righe di dettaglio: array JSON serializzato dal JS al submit
                 lines_raw = request.form.get("lines_json", "[]")
                 lines_data = _json.loads(lines_raw) if lines_raw else []
-                if not isinstance(lines_data, list) or not lines_data:
+                if not isinstance(lines_data, list):
+                    lines_data = []
+                if not is_draft_save and not lines_data:
                     raise ValueError("Almeno una riga di dettaglio è obbligatoria")
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
@@ -634,7 +649,7 @@ def create_app():
             parsed_lines = []
             for i, ln in enumerate(lines_data, start=1):
                 desc = str(ln.get("descrizione", "")).strip()
-                if not desc:
+                if not desc and not is_draft_save:
                     flash(f"⚠️ Riga {i}: descrizione obbligatoria.", "warning")
                     return redirect(url_for("new_outgoing_invoice"))
                 try:
@@ -642,19 +657,22 @@ def create_app():
                     prezzo = float(ln.get("prezzo_unitario") or 0)
                     iva_riga = float(ln.get("aliquota_iva") or 0)
                 except (TypeError, ValueError):
-                    flash(f"⚠️ Riga {i}: importi non numerici.", "warning")
-                    return redirect(url_for("new_outgoing_invoice"))
-                if qta <= 0 or prezzo < 0:
+                    if is_draft_save:
+                        qta, prezzo, iva_riga = 0.0, 0.0, 22.0
+                    else:
+                        flash(f"⚠️ Riga {i}: importi non numerici.", "warning")
+                        return redirect(url_for("new_outgoing_invoice"))
+                if not is_draft_save and (qta <= 0 or prezzo < 0):
                     flash(f"⚠️ Riga {i}: quantità > 0 e prezzo >= 0 obbligatori.", "warning")
                     return redirect(url_for("new_outgoing_invoice"))
                 natura_riga = str(ln.get("natura", "")).strip().upper()
-                if iva_riga == 0 and not natura_riga:
+                if iva_riga == 0 and not natura_riga and not is_draft_save:
                     flash(f"⚠️ Riga {i}: con IVA 0% indica la Natura.", "warning")
                     return redirect(url_for("new_outgoing_invoice"))
                 if iva_riga > 0:
                     natura_riga = ""
                 parsed_lines.append({
-                    "descrizione": desc[:1000],
+                    "descrizione": desc[:1000] or "(da completare)",
                     "quantita": qta,
                     "unita_misura": str(ln.get("unita_misura", "")).strip()[:20],
                     "prezzo_unitario": round(prezzo, 2),
@@ -696,44 +714,51 @@ def create_app():
                 iva_amount += round(cassa_importo * parsed_lines[0]["aliquota_iva"] / 100.0, 2)
                 iva_amount = round(iva_amount, 2)
 
-            client = Client.query.filter_by(id=client_id, user_id=uid).first()
-            if not client:
+            client = Client.query.filter_by(id=client_id, user_id=uid).first() if client_id else None
+            if not client and not is_draft_save:
                 flash("Cliente non trovato.", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
 
-            # Validazione cliente FatturaPA
-            client_missing = []
-            if not client.address:    client_missing.append("indirizzo")
-            if not client.city:       client_missing.append("comune")
-            if not client.cap:        client_missing.append("CAP")
-            if not client.provincia:  client_missing.append("provincia")
-            cd = (client.codice_destinatario or "").strip()
-            if len(cd) != 7 and not client.pec:
-                client_missing.append("codice destinatario o PEC")
-            if client_missing:
-                flash(f"⚠️ Cliente {client.name}: completa prima questi campi: {', '.join(client_missing)}.",
-                      "warning")
-                return redirect(url_for("edit_client", cid=client.id))
+            # Validazione cliente FatturaPA — solo per emissione, non per bozze
+            if not is_draft_save and client:
+                client_missing = []
+                if not client.address:    client_missing.append("indirizzo")
+                if not client.city:       client_missing.append("comune")
+                if not client.cap:        client_missing.append("CAP")
+                if not client.provincia:  client_missing.append("provincia")
+                cd = (client.codice_destinatario or "").strip()
+                if len(cd) != 7 and not client.pec:
+                    client_missing.append("codice destinatario o PEC")
+                if client_missing:
+                    flash(f"⚠️ Cliente {client.name}: completa prima questi campi: {', '.join(client_missing)}.",
+                          "warning")
+                    return redirect(url_for("edit_client", cid=client.id))
 
             # Totale documento: imponibile + cassa + IVA (iva_amount già
             # calcolato sopra aggregando per riga + cassa)
             totale = round(imponibile + cassa_importo + iva_amount, 2)
 
-            # Numerazione progressiva per anno
-            year = issue_date.year
-            prog = _next_progressivo(uid, year)
-            invoice_number = f"{prog}/{year}"
+            # Numerazione progressiva per anno (solo se finalizzazione, non bozza)
+            if is_draft_save:
+                prog = None
+                invoice_number = "BOZZA"  # placeholder, lo aggiorniamo post-commit
+            else:
+                year = issue_date.year
+                prog = _next_progressivo(uid, year)
+                invoice_number = f"{prog}/{year}"
 
             inv = Invoice(
-                user_id=uid, client_id=client.id,
+                user_id=uid, client_id=(client.id if client else None),
                 number=invoice_number, amount=totale,
                 imponibile=imponibile, iva_rate=iva_rate, iva_amount=iva_amount,
                 issue_date=issue_date, due_date=due_date,
-                document_type=document_type, status="pending",
+                document_type=document_type,
+                status=("cancelled" if is_draft_save else "pending"),
                 is_outgoing=True, is_passive=False,
                 progressivo=prog,
                 notes=description,
-                sdi_status="draft",
+                sdi_status=("" if is_draft_save else "draft"),
+                is_draft=is_draft_save,
                 natura_iva=natura_iva,
                 cassa_tipologia=cassa_tipologia,
                 cassa_aliquota=cassa_aliquota,
@@ -744,6 +769,10 @@ def create_app():
                 ritenuta_causale=ritenuta_causale,
             )
             db.session.add(inv); db.session.commit()
+            # Per bozze: number = "BOZZA-{id}" così è leggibile
+            if is_draft_save:
+                inv.number = f"BOZZA-{inv.id}"
+                db.session.commit()
             # Persisti le righe di dettaglio (Fase 3 Blocco B)
             from models import InvoiceLine
             for idx, ln in enumerate(parsed_lines, start=1):
@@ -758,7 +787,13 @@ def create_app():
                     natura=ln["natura"],
                 ))
             db.session.commit()
-            db.session.refresh(inv)  # carica inv.lines per il generatore
+            db.session.refresh(inv)
+
+            if is_draft_save:
+                audit("invoice_draft_saved", target=f"invoice:{inv.number}")
+                flash(f"💾 Bozza {inv.number} salvata. Puoi riprenderla da \"Bozze\".",
+                      "success")
+                return redirect(url_for("drafts"))
 
             try:
                 _build_outgoing_xml(inv)
@@ -774,12 +809,84 @@ def create_app():
 
             return redirect(url_for("invoice_detail", iid=inv.id))
 
-        # GET: form
+        # GET: form (nuova fattura, no draft)
         next_prog = _next_progressivo(uid, date.today().year)
         return render_template("new_outgoing_invoice.html",
                                clients=clients_list,
                                next_number=f"{next_prog}/{date.today().year}",
-                               today=date.today())
+                               today=date.today(),
+                               draft=None,
+                               draft_lines_json="[]")
+
+    @app.route("/invoices/drafts")
+    @login_required
+    def drafts():
+        """Lista bozze fatture (non finalizzate) dell'utente."""
+        drafts_list = (my_drafts()
+                       .order_by(Invoice.created_at.desc())
+                       .all())
+        return render_template("drafts.html", drafts=drafts_list)
+
+    @app.route("/invoices/<int:iid>/edit-draft", methods=["GET", "POST"])
+    @login_required
+    def edit_draft(iid):
+        """Edita una bozza esistente. POST con action=draft aggiorna la bozza;
+        POST con action=submit la finalizza (assegna progressivo + genera XML).
+        L'effettiva persistenza viene fatta cancellando l'attuale bozza e
+        ricreando l'Invoice tramite redirect interno a /invoices/emit POST."""
+        import json as _json
+        inv = Invoice.query.filter_by(id=iid, user_id=current_user.id, is_draft=True).first()
+        if not inv:
+            flash("Bozza non trovata.", "danger")
+            return redirect(url_for("drafts"))
+        if request.method == "GET":
+            clients_list = my_clients().order_by(Client.name).all()
+            # Serializza le righe della bozza in JSON per il pre-populate JS
+            lines_json = _json.dumps([
+                {
+                    "descrizione": l.descrizione or "",
+                    "quantita": l.quantita or 0,
+                    "unita_misura": l.unita_misura or "",
+                    "prezzo_unitario": l.prezzo_unitario or 0,
+                    "aliquota_iva": l.aliquota_iva or 0,
+                    "natura": l.natura or "",
+                } for l in inv.lines
+            ])
+            return render_template("new_outgoing_invoice.html",
+                                   clients=clients_list,
+                                   next_number=inv.number,
+                                   today=date.today(),
+                                   draft=inv,
+                                   draft_lines_json=lines_json)
+        # POST: stesso codice di /invoices/emit ma aggiornando questa Invoice.
+        # Approccio pragmatico: cancello la vecchia bozza (cascade su lines) e
+        # delego al flusso POST di /invoices/emit (form già contiene tutti i
+        # dati corretti). Quel flusso decide se è bozza o emissione in base
+        # a action=draft|submit.
+        from models import InvoiceLine
+        InvoiceLine.query.filter_by(invoice_id=inv.id).delete()
+        db.session.delete(inv)
+        db.session.commit()
+        # Re-routing al POST di /invoices/emit: il form contiene tutto, basta
+        # forwardare. Flask non ha un forward, quindi rifaccio la stessa
+        # logica chiamando direttamente la view function.
+        return new_outgoing_invoice()
+
+    @app.route("/invoices/<int:iid>/delete-draft", methods=["POST"])
+    @login_required
+    def delete_draft(iid):
+        """Elimina una bozza."""
+        inv = Invoice.query.filter_by(id=iid, user_id=current_user.id, is_draft=True).first()
+        if not inv:
+            flash("Bozza non trovata.", "danger")
+            return redirect(url_for("drafts"))
+        from models import InvoiceLine
+        InvoiceLine.query.filter_by(invoice_id=inv.id).delete()
+        db.session.delete(inv)
+        db.session.commit()
+        audit("invoice_draft_deleted", target=f"invoice:BOZZA-{iid}")
+        flash("Bozza eliminata.", "info")
+        return redirect(url_for("drafts"))
 
     @app.route("/invoices/<int:iid>/xml")
     @login_required
@@ -4786,6 +4893,10 @@ def _migrate_db():
             conn.execute(text("ALTER TABLE invoices ADD COLUMN ritenuta_causale TEXT DEFAULT ''"))
             conn.commit()
             logging.info("Migrazione: aggiunta colonna invoices.ritenuta_causale")
+        if "is_draft" not in existing:
+            conn.execute(text("ALTER TABLE invoices ADD COLUMN is_draft INTEGER DEFAULT 0"))
+            conn.commit()
+            logging.info("Migrazione: aggiunta colonna invoices.is_draft")
 
         # ── Tabella invoice_lines (righe multiple, Fase 3 Blocco B) ──────────
         # db.create_all() già crea la tabella se assente. Qui facciamo backfill:

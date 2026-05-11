@@ -9,13 +9,21 @@
 </div>
 
 <h2 class="mb-3">
-  <i class="bi bi-receipt me-2"></i> Emetti nuova fattura FatturaPA
+  <i class="bi bi-receipt me-2"></i>
+  {% if draft %}Modifica bozza fattura{% else %}Emetti nuova fattura FatturaPA{% endif %}
 </h2>
 <p class="text-muted mb-4">
-  Compila i campi e GestFatture genera l'XML conforme allo standard FatturaPA 1.2.x.
-  Puoi <strong>scaricare l'XML</strong> per inviarlo manualmente via PEC al SDI,
-  oppure usare il pulsante <strong>Invia a SDI via Aruba</strong> dalla pagina di dettaglio
-  (richiede Aruba SDI attivo nelle Impostazioni).
+  {% if draft %}
+    Stai modificando una <strong>bozza</strong> non finalizzata (nessun numero
+    progressivo assegnato, nessun XML generato). Premi <em>Finalizza</em> per
+    emettere ufficialmente la fattura, oppure <em>Salva modifiche</em> per
+    continuare dopo.
+  {% else %}
+    Compila i campi e GestFatture genera l'XML conforme allo standard FatturaPA 1.2.x.
+    Puoi <strong>scaricare l'XML</strong> per inviarlo manualmente via PEC al SDI,
+    oppure usare il pulsante <strong>Invia a SDI via Aruba</strong> dalla pagina di dettaglio
+    (richiede Aruba SDI attivo nelle Impostazioni).
+  {% endif %}
 </p>
 
 <div class="row">
@@ -24,15 +32,26 @@
       <div class="card-body">
         <form method="post" autocomplete="off">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {# Wrapper con tutti i valori della bozza, letti dal JS al load per popolare i campi #}
+          {% if draft %}
+          <div id="draft-data" class="d-none"
+               data-cassa-tipologia="{{ draft.cassa_tipologia or '' }}"
+               data-cassa-aliquota="{{ '%.2f' % (draft.cassa_aliquota or 0) }}"
+               data-ritenuta-tipologia="{{ draft.ritenuta_tipologia or '' }}"
+               data-ritenuta-aliquota="{{ '%.2f' % (draft.ritenuta_aliquota or 0) }}"
+               data-ritenuta-causale="{{ draft.ritenuta_causale or '' }}"
+               data-lines-json='{{ draft_lines_json|safe }}'></div>
+          {% endif %}
 
           <!-- Tipo documento -->
           <div class="mb-3">
             <label class="form-label fw-semibold">Tipo documento *</label>
+            {% set _dt = draft.document_type if draft else 'TD01' %}
             <select name="document_type" id="document-type-select" class="form-select"
                     onchange="updateTipoDocumentoUI()">
-              <option value="TD01" selected>TD01 — Fattura</option>
-              <option value="TD06">TD06 — Parcella (professionista)</option>
-              <option value="TD05">TD05 — Nota di debito</option>
+              <option value="TD01" {% if _dt == 'TD01' %}selected{% endif %}>TD01 — Fattura</option>
+              <option value="TD06" {% if _dt == 'TD06' %}selected{% endif %}>TD06 — Parcella (professionista)</option>
+              <option value="TD05" {% if _dt == 'TD05' %}selected{% endif %}>TD05 — Nota di debito</option>
             </select>
             <div class="form-text">
               Per nota di credito (TD04) usa il pulsante "Crea Nota di Credito"
@@ -43,9 +62,10 @@
           <!-- Cliente -->
           <div class="mb-3">
             <label class="form-label fw-semibold">Cliente *</label>
+            {% set _cli = draft.client_id if draft else 0 %}
             <select name="client_id" id="client-select" class="form-select" required>
               <option value="">— Seleziona cliente —</option>
-              {% for c in clients %}
+              {% for c in clients %}{# pre-select se editing bozza #}
                 {% set missing_list = [] %}
                 {% if not c.address %}{% set _ = missing_list.append('indirizzo') %}{% endif %}
                 {% if not c.city %}{% set _ = missing_list.append('comune') %}{% endif %}
@@ -55,6 +75,7 @@
                   {% set _ = missing_list.append('codice destinatario o PEC') %}
                 {% endif %}
                 <option value="{{ c.id }}"
+                        {% if c.id == _cli %}selected{% endif %}
                         data-missing="{{ '1' if missing_list else '0' }}"
                         data-missing-fields="{{ missing_list|join(', ') }}"
                         data-edit-url="{{ url_for('edit_client', cid=c.id) }}"
@@ -89,12 +110,12 @@
             <div class="col-sm-4">
               <label class="form-label fw-semibold">Data emissione *</label>
               <input type="date" name="issue_date" class="form-control" required
-                     value="{{ today.strftime('%Y-%m-%d') }}">
+                     value="{{ (draft.issue_date if draft else today).strftime('%Y-%m-%d') }}">
             </div>
             <div class="col-sm-4">
               <label class="form-label fw-semibold">Data scadenza *</label>
               <input type="date" name="due_date" class="form-control" required
-                     value="{{ today.strftime('%Y-%m-%d') }}">
+                     value="{{ (draft.due_date if draft else today).strftime('%Y-%m-%d') }}">
             </div>
           </div>
 
@@ -206,8 +227,9 @@
           <div class="row g-3 mb-3">
             <div class="col-sm-7">
               <label class="form-label fw-semibold">Cassa previdenziale (opzionale)</label>
+              {% set _cassa = draft.cassa_tipologia if draft else '' %}
               <select name="cassa_tipologia" id="cassa-tipologia-select" class="form-select"
-                      onchange="updateTotale()">
+                      onchange="updateSummary()">
                 <option value="">— Nessuna —</option>
                 <option value="TC01">TC01 — Cassa Dottori Commercialisti</option>
                 <option value="TC02">TC02 — Cassa Forense (avvocati)</option>
@@ -351,8 +373,15 @@
 
           <hr class="my-4">
 
-          <button type="submit" id="submit-emit" class="btn btn-primary btn-lg">
-            <i class="bi bi-file-earmark-check me-1"></i> Emetti fattura e genera XML
+          <button type="submit" id="submit-emit" name="action" value="submit"
+                  class="btn btn-primary btn-lg">
+            <i class="bi bi-file-earmark-check me-1"></i>
+            {% if draft %}Finalizza ed emetti{% else %}Emetti fattura e genera XML{% endif %}
+          </button>
+          <button type="submit" id="submit-draft" name="action" value="draft"
+                  formnovalidate class="btn btn-outline-primary btn-lg">
+            <i class="bi bi-save me-1"></i>
+            {% if draft %}Salva modifiche bozza{% else %}Salva come bozza{% endif %}
           </button>
           <a href="{{ url_for('invoices') }}" class="btn btn-outline-secondary">Annulla</a>
         </form>
@@ -502,6 +531,8 @@ function updateClientMissing() {
   const nameEl = document.getElementById('client-missing-name');
   const fieldsEl = document.getElementById('client-missing-fields');
   const linkEl = document.getElementById('client-missing-link');
+  // Solo "Emetti" si disabilita: "Salva bozza" deve restare attivo (la bozza
+  // può essere salvata anche con cliente incompleto — sistemerai dopo).
   const submitBtn = document.getElementById('submit-emit');
   if (opt && opt.value && opt.dataset.missing === '1') {
     nameEl.textContent = opt.dataset.name;
@@ -518,13 +549,18 @@ document.getElementById('client-select').addEventListener('change', updateClient
 
 // ═════════ Submit: serializza righe in JSON nascosto ══════════════════════
 document.querySelector('form').addEventListener('submit', function(e) {
+  const isDraft = e.submitter && e.submitter.value === 'draft';
   const lines = readLines();
+  // Serializza sempre le righe (anche per bozze, salva quello che c'è)
+  document.getElementById('lines-json').value = JSON.stringify(lines);
+  // Per le bozze: niente validazione strict, salva quello che c'è
+  if (isDraft) return;
+  // Per finalizzazione/emissione: validation completa
   if (lines.length === 0) {
     e.preventDefault();
     alert('Devi aggiungere almeno una riga.');
     return;
   }
-  // Validation cliente: descrizione + quantita > 0 + prezzo >= 0
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (!l.descrizione) {
@@ -548,12 +584,61 @@ document.querySelector('form').addEventListener('submit', function(e) {
       return;
     }
   }
-  document.getElementById('lines-json').value = JSON.stringify(lines);
 });
 
 // ═════════ Init ═══════════════════════════════════════════════════════════
-// Aggiungi una riga iniziale al caricamento
-addLine();
+function populateLineFromData(tr, data) {
+  tr.querySelector('.line-descrizione').value = data.descrizione || '';
+  tr.querySelector('.line-quantita').value = data.quantita || 1;
+  tr.querySelector('.line-um').value = data.unita_misura || '';
+  tr.querySelector('.line-prezzo').value = data.prezzo_unitario || 0;
+  tr.querySelector('.line-iva').value = String(data.aliquota_iva || 0);
+  const natSel = tr.querySelector('.line-natura');
+  // Mostra/nasconde Natura in base all'IVA
+  if ((data.aliquota_iva || 0) === 0) {
+    natSel.classList.remove('d-none');
+    natSel.required = true;
+    natSel.value = data.natura || '';
+  }
+  updateLineTotale(tr.querySelector('.line-prezzo'));
+}
+
+const draftData = document.getElementById('draft-data');
+if (draftData) {
+  // Pre-popola Cassa
+  const cassaTipo = draftData.dataset.cassaTipologia;
+  if (cassaTipo) {
+    document.getElementById('cassa-tipologia-select').value = cassaTipo;
+    document.getElementById('cassa-aliquota-input').value = draftData.dataset.cassaAliquota;
+  }
+  // Pre-popola Ritenuta
+  const ritTipo = draftData.dataset.ritenutaTipologia;
+  if (ritTipo) {
+    document.getElementById('ritenuta-tipologia-select').value = ritTipo;
+    document.getElementById('ritenuta-aliquota-input').value = draftData.dataset.ritenutaAliquota;
+    document.getElementById('ritenuta-causale-select').value = draftData.dataset.ritenutaCausale;
+  }
+  // Pre-popola le righe della bozza
+  let lines = [];
+  try { lines = JSON.parse(draftData.dataset.linesJson || '[]'); } catch (e) { lines = []; }
+  if (lines.length > 0) {
+    lines.forEach(ln => {
+      addLine();
+      const rows = document.querySelectorAll('#lines-tbody tr.line-row');
+      const lastTr = rows[rows.length - 1];
+      populateLineFromData(lastTr, ln);
+    });
+  } else {
+    addLine();  // almeno 1 riga vuota
+  }
+  updateSummary();
+} else {
+  // Nuova fattura: 1 riga vuota iniziale
+  addLine();
+}
+
+// Trigger updateClientMissing all'init per controllo immediato
+updateClientMissing();
 </script>
 
 {% endblock %}

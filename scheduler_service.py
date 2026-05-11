@@ -42,7 +42,12 @@ def run_daily_job(app):
 
         # Itera tutte le fatture pending/overdue di tutti gli utenti.
         # Ogni reminder usa il nome azienda dell'utente proprietario via Invoice.user_id.
-        invoices = Invoice.query.filter(Invoice.status.in_(["pending", "overdue"])).all()
+        # Esclude le bozze (is_draft=True) che non hanno progressivo/XML e non
+        # vanno mai sollecitate.
+        invoices = (Invoice.query
+                    .filter(Invoice.status.in_(["pending", "overdue"]))
+                    .filter(db.or_(Invoice.is_draft.is_(False), Invoice.is_draft.is_(None)))
+                    .all())
 
         for inv in invoices:
             # Salta le note di credito: non sono da sollecitare

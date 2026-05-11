@@ -82,6 +82,12 @@
         </a>
       </li>
       <li>
+        <a href="{{ url_for('drafts') }}"
+           class="nav-link text-white {% if request.endpoint in ('drafts', 'edit_draft') %}active{% endif %}" style="padding-left:2.2rem;font-size:.88rem;opacity:.85">
+          <i class="bi bi-save me-2"></i> Bozze
+        </a>
+      </li>
+      <li>
         <a href="{{ url_for('clients') }}"
            class="nav-link text-white {% if 'client' in (request.endpoint or '') %}active{% endif %}">
           <i class="bi bi-people me-2"></i> Clienti

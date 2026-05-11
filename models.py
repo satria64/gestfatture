@@ -280,6 +280,9 @@ class Invoice(db.Model):
     ritenuta_aliquota  = db.Column(db.Float, default=0.0)     # % es. 20.0
     ritenuta_importo   = db.Column(db.Float, default=0.0)     # = imponibile * aliquota/100
     ritenuta_causale   = db.Column(db.String(4), default="")  # A, M, W, M1, ecc.
+    # Bozza non finalizzata (Fase 3 Blocco B). Non ha progressivo né XML, non
+    # entra nel ciclo solleciti, esclusa dalle liste fatture standard.
+    is_draft           = db.Column(db.Boolean, default=False, nullable=False, index=True)
     created_at         = db.Column(db.DateTime, default=datetime.utcnow)
 
     client    = db.relationship("Client", back_populates="invoices")
@@ -327,6 +330,8 @@ class Invoice(db.Model):
 
     @property
     def status_label(self):
+        if self.is_draft:
+            return ("Bozza", "secondary")
         labels = {
             "pending":     ("In attesa",         "primary"),
             "overdue":     ("Scaduta",           "danger"),
