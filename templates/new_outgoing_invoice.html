@@ -25,6 +25,21 @@
         <form method="post" autocomplete="off">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
+          <!-- Tipo documento -->
+          <div class="mb-3">
+            <label class="form-label fw-semibold">Tipo documento *</label>
+            <select name="document_type" id="document-type-select" class="form-select"
+                    onchange="updateTipoDocumentoUI()">
+              <option value="TD01" selected>TD01 — Fattura</option>
+              <option value="TD06">TD06 — Parcella (professionista)</option>
+              <option value="TD05">TD05 — Nota di debito</option>
+            </select>
+            <div class="form-text">
+              Per nota di credito (TD04) usa il pulsante "Crea Nota di Credito"
+              dalla pagina di dettaglio della fattura originale.
+            </div>
+          </div>
+
           <!-- Cliente -->
           <div class="mb-3">
             <label class="form-label fw-semibold">Cliente *</label>

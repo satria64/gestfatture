@@ -602,6 +602,9 @@ def create_app():
                 ritenuta_tipologia = (request.form.get("ritenuta_tipologia", "") or "").strip().upper()
                 ritenuta_aliquota = float(request.form.get("ritenuta_aliquota", "0").replace(",", ".") or "0")
                 ritenuta_causale = (request.form.get("ritenuta_causale", "") or "").strip().upper()
+                document_type = (request.form.get("document_type", "TD01") or "TD01").strip().upper()
+                if document_type not in ("TD01", "TD05", "TD06"):
+                    document_type = "TD01"  # TD04 NC creata da route dedicata
             except Exception as e:
                 flash(f"❌ Dati non validi: {e}", "danger")
                 return redirect(url_for("new_outgoing_invoice"))
@@ -662,7 +665,7 @@ def create_app():
                 number=invoice_number, amount=totale,
                 imponibile=imponibile, iva_rate=iva_rate, iva_amount=iva_amount,
                 issue_date=issue_date, due_date=due_date,
-                document_type="TD01", status="pending",
+                document_type=document_type, status="pending",
                 is_outgoing=True, is_passive=False,
                 progressivo=prog,
                 notes=description,
